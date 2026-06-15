@@ -10,3 +10,6 @@ build/
 
 # local implementation-plan scratch (agent-process artifacts, not shipped)
 plans/
+
+# visual brainstorming companion artifacts
+.superpowers/

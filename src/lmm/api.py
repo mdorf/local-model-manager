@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 import threading
 from pathlib import Path
 
@@ -47,8 +48,9 @@ def _default_command_builder(config: DaemonConfig):
 def _make_auth(config: DaemonConfig):
     def require_token(authorization: str | None = Header(default=None)):
         if not config.token:
-            return
-        if authorization != f"Bearer {config.token}":
+            return  # empty token = auth disabled (dev only); real configs auto-generate one
+        expected = f"Bearer {config.token}"
+        if authorization is None or not secrets.compare_digest(authorization, expected):
             raise HTTPException(status_code=401, detail="invalid or missing token")
     return require_token
 

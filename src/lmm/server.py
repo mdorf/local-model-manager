@@ -10,7 +10,7 @@ from pathlib import Path
 from lmm.health import is_healthy, smoke_test, wait_for_health
 from lmm.ports import is_port_in_use
 from lmm.process import pid_alive, spawn, stop_proc, terminate_pid
-from lmm.state import InstanceRecord, load_instances, mutate_instances, save_instances, state_dir
+from lmm.state import InstanceRecord, load_instances, mutate_instances, state_dir
 
 
 @dataclass
@@ -37,9 +37,6 @@ class ServerManager:
 
     def list(self) -> list[InstanceRecord]:
         return load_instances()
-
-    def _save(self, records: list[InstanceRecord]) -> None:
-        save_instances(records)
 
     def _upsert(self, rec: InstanceRecord) -> None:
         def apply(recs):

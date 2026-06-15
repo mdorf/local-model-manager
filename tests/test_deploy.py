@@ -3,8 +3,10 @@ import plistlib
 from lmm.deploy import (
     LABEL,
     account_steps,
+    account_uid,
     acl_remove_steps,
     acl_steps,
+    existing_install_artifacts,
     find_free_service_uid,
     install_steps,
     launchd_plist,
@@ -125,3 +127,81 @@ def test_shared_venv_steps():
     assert "uv venv" in joined
     assert "uv pip install" in joined and "/proj" in joined
     assert shared_venv_exec("/Users/Shared/local-model-manager").endswith("venv/bin/lmm")
+
+
+def test_shared_venv_uses_lmm_readable_python():
+    # regression: the venv must be built against a Python installed INSIDE the
+    # shared tree (readable by _lmm after chown), not uv's managed interpreter
+    # under misha's home (which _lmm cannot read -> launchd I/O error).
+    shared = "/Users/Shared/local-model-manager"
+    steps = shared_venv_steps(shared_dir=shared, project_dir="/proj", user="_lmm")
+    joined = "\n".join(steps)
+    # a Python is installed into the shared tree, without a bin-dir shim
+    assert "uv python install" in joined and "3.11" in joined
+    assert "--no-bin" in joined
+    assert f"{shared}/python" in joined
+    # the venv is built from a uv-managed interpreter (not system/home python),
+    # and the venv step itself points uv at the shared install dir (not just
+    # the install step) so the venv can't resolve a different managed Python.
+    venv_step = next(s for s in steps if "uv venv" in s)
+    assert "--managed-python" in venv_step
+    assert "UV_PYTHON_INSTALL_DIR" in venv_step and f"{shared}/python" in venv_step
+    # the whole shared tree is handed to the service account recursively
+    assert "chown -R" in joined and "_lmm:staff" in joined and shared in joined
+    # ordering: install python -> create venv -> chown
+    install_idx = next(i for i, s in enumerate(steps) if "uv python install" in s)
+    venv_idx = next(i for i, s in enumerate(steps) if "uv venv" in s)
+    chown_idx = next(i for i, s in enumerate(steps) if "chown -R" in s)
+    assert install_idx < venv_idx < chown_idx
+
+
+def test_shared_venv_clear_flag():
+    plain = "\n".join(shared_venv_steps(shared_dir="/s", project_dir="/p", user="_lmm"))
+    assert "--clear" not in plain
+    cleared = shared_venv_steps(shared_dir="/s", project_dir="/p", user="_lmm", clear=True)
+    venv_step = next(s for s in cleared if "uv venv" in s)
+    assert "--clear" in venv_step
+
+
+def test_install_steps_reinstall_adds_bootout_and_clear():
+    plain = "\n".join(install_steps(user="_lmm", uid=251, host="127.0.0.1", port=8770,
+                                    models_dir="/m", shared_dir="/s", project_dir="/p"))
+    assert "launchctl bootout" not in plain
+    reinst = install_steps(user="_lmm", uid=251, host="127.0.0.1", port=8770,
+                           models_dir="/m", shared_dir="/s", project_dir="/p",
+                           reinstall=True)
+    joined = "\n".join(reinst)
+    assert "launchctl bootout" in joined and "--clear" in joined
+    bootout_idx = next(i for i, s in enumerate(reinst) if "bootout" in s)
+    bootstrap_idx = next(i for i, s in enumerate(reinst) if "bootstrap" in s)
+    assert bootout_idx < bootstrap_idx
+
+
+def test_account_uid_returns_none_for_absent_user():
+    assert account_uid("_lmm_absent_test_xyz_12345") is None
+
+
+def test_existing_install_artifacts_detects_present_pieces(monkeypatch, tmp_path):
+    # Hermetic: drive both branches via monkeypatch rather than the live host
+    # (the real plist/account would otherwise leak in when a daemon is installed).
+    monkeypatch.setattr("os.path.exists", lambda p: False)
+    monkeypatch.setattr("lmm.deploy.account_uid", lambda user: None)
+    assert existing_install_artifacts(user="_lmm", shared_dir=str(tmp_path)) == []
+
+    monkeypatch.setattr("os.path.exists", lambda p: True)
+    monkeypatch.setattr("lmm.deploy.account_uid", lambda user: 250)
+    found = existing_install_artifacts(user="_lmm", shared_dir=str(tmp_path))
+    assert any("plist" in f for f in found)
+    assert any("venv" in f for f in found)
+    assert any("_lmm" in f and "250" in f for f in found)
+
+
+def test_uninstall_removes_acl_before_deleting_account():
+    # regression: chmod -a "<user> allow ..." must run while the account still
+    # resolves, i.e. BEFORE `dscl . -delete`, or it orphans a UUID ACL.
+    steps = uninstall_steps(user="_lmm",
+                            models_dir="/Users/Shared/models",
+                            shared_dir="/Users/Shared/local-model-manager")
+    acl_idx = next(i for i, s in enumerate(steps) if "chmod" in s and "-a " in s)
+    delete_idx = next(i for i, s in enumerate(steps) if "dscl . -delete" in s)
+    assert acl_idx < delete_idx

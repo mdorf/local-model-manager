@@ -10,7 +10,7 @@ from pathlib import Path
 from lmm.health import is_healthy, smoke_test, wait_for_health
 from lmm.ports import is_port_in_use
 from lmm.process import pid_alive, spawn, stop_proc, terminate_pid
-from lmm.state import InstanceRecord, load_instances, save_instances, state_dir
+from lmm.state import InstanceRecord, load_instances, mutate_instances, save_instances, state_dir
 
 
 @dataclass
@@ -42,12 +42,12 @@ class ServerManager:
         save_instances(records)
 
     def _upsert(self, rec: InstanceRecord) -> None:
-        recs = [r for r in load_instances() if r.port != rec.port]
-        recs.append(rec)
-        self._save(recs)
+        def apply(recs):
+            return [r for r in recs if r.port != rec.port] + [rec]
+        mutate_instances(apply)
 
     def forget(self, port: int) -> None:
-        self._save([r for r in load_instances() if r.port != port])
+        mutate_instances(lambda recs: [r for r in recs if r.port != port])
         self._procs.pop(port, None)
 
     def start(self, command: list[str], *, port: int, model_path: str,

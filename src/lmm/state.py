@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import sys
@@ -56,3 +57,26 @@ def save_instances(records: list[InstanceRecord]) -> None:
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps([asdict(r) for r in records], indent=2))
     tmp.replace(path)  # atomic
+
+
+def _lock_file() -> Path:
+    return state_dir() / "instances.lock"
+
+
+def mutate_instances(mutator):
+    """Atomically read -> mutator(list) -> save, under a cross-process exclusive lock.
+
+    `mutator` receives the current list of InstanceRecord and returns the new list.
+    Serializes concurrent writers (daemon threadpool + any direct CLI invocation)
+    so no read-modify-write update is lost.
+    """
+    lock_path = _lock_file()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "w") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            new_records = mutator(load_instances())
+            save_instances(new_records)
+            return new_records
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)

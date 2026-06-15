@@ -132,4 +132,17 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
             inst = app.state.manager.switch(command, port=port, model_path=model_path)
         return _instance_dict(inst)
 
+    @app.get("/api/connection-info", dependencies=[Depends(auth)])
+    def connection_info():
+        running = app.state.manager.status()
+        inst = running[0] if running else None
+        if inst is not None:
+            base_url = inst.base_url.rstrip("/") + "/v1"
+            model_id = Path(inst.model_path).stem
+        else:
+            base_url = f"http://{config.host}:8080/v1"
+            model_id = None
+        return {"base_url": base_url, "inference_key": config.inference_key,
+                "model_id": model_id}
+
     return app

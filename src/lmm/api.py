@@ -131,9 +131,11 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
         if model is None:
             raise HTTPException(status_code=404, detail="model not found")
         metadata = read_gguf(model.shards[0]).metadata
+        # 8080 = the default model-server port for the preview (config.port is
+        # the *daemon* control port, not where llama-server listens).
         cfg = recommend_config(model, metadata, detect_hardware(),
                                supported=get_supported_flags() or None,
-                               port=config.port, alias=model.path.stem)
+                               port=8080, alias=model.path.stem)
         return {"model": model.path.name, "context": cfg.context,
                 "cache_type": cfg.cache_type, "flags": cfg.flags,
                 "warnings": cfg.warnings,

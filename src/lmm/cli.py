@@ -228,7 +228,7 @@ def cmd_unbind(args: argparse.Namespace) -> int:
 
 
 SHARED_DIR = "/Users/Shared/local-model-manager"
-_DAEMON_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+_DAEMON_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 
 def _install_user(args: argparse.Namespace) -> str:

@@ -134,8 +134,9 @@ def test_shared_venv_uses_lmm_readable_python():
     shared = "/Users/Shared/local-model-manager"
     steps = shared_venv_steps(shared_dir=shared, project_dir="/proj", user="_lmm")
     joined = "\n".join(steps)
-    # a Python is installed into the shared tree
+    # a Python is installed into the shared tree, without a bin-dir shim
     assert "uv python install" in joined and "3.11" in joined
+    assert "--no-bin" in joined
     assert f"{shared}/python" in joined
     # the venv is built from a uv-managed interpreter (not system/home python),
     # and the venv step itself points uv at the shared install dir (not just

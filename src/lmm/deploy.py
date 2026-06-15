@@ -81,7 +81,10 @@ def shared_venv_steps(*, shared_dir: str, project_dir: str, user: str) -> list[s
     # can read the interpreter the venv links to (uv's default managed Python
     # lives under the installing user's home, which _lmm cannot read).
     return [
-        f"UV_PYTHON_INSTALL_DIR={py_dir_q} uv python install 3.11",
+        # --no-bin: don't drop a python3.11 shim into a bin dir (under sudo that
+        # would be a root-owned file in the installing user's ~/.local/bin); the
+        # venv references the interpreter by its full path in the shared tree.
+        f"UV_PYTHON_INSTALL_DIR={py_dir_q} uv python install --no-bin 3.11",
         f"UV_PYTHON_INSTALL_DIR={py_dir_q} uv venv --managed-python --python 3.11 {venv}",
         f"uv pip install --python {venv_py} {shlex.quote(project_dir)}",
         # Hand the whole shared tree (python + venv + daemon.json) to the

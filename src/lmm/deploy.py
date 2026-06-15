@@ -114,10 +114,12 @@ def uninstall_steps(*, user: str, models_dir: str | None = None,
     steps = [
         f"launchctl bootout system {_PLIST_PATH}",
         f"rm -f {_PLIST_PATH}",
-        f"dscl . -delete /Users/{user}",
     ]
+    # Remove the models-dir ACL while the account still resolves; deleting the
+    # account first would leave an orphaned-UUID ACL on the dir + files.
     if models_dir:
         steps.extend(acl_remove_steps(user=user, models_dir=models_dir))
+    steps.append(f"dscl . -delete /Users/{user}")
     if shared_dir:
         steps.append(f"rm -rf {shlex.quote(shared_dir)}")
     return steps

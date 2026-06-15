@@ -125,3 +125,14 @@ def test_shared_venv_steps():
     assert "uv venv" in joined
     assert "uv pip install" in joined and "/proj" in joined
     assert shared_venv_exec("/Users/Shared/local-model-manager").endswith("venv/bin/lmm")
+
+
+def test_uninstall_removes_acl_before_deleting_account():
+    # regression: chmod -a "<user> allow ..." must run while the account still
+    # resolves, i.e. BEFORE `dscl . -delete`, or it orphans a UUID ACL.
+    steps = uninstall_steps(user="_lmm",
+                            models_dir="/Users/Shared/models",
+                            shared_dir="/Users/Shared/local-model-manager")
+    acl_idx = next(i for i, s in enumerate(steps) if "chmod" in s and "-a " in s)
+    delete_idx = next(i for i, s in enumerate(steps) if "dscl . -delete" in s)
+    assert acl_idx < delete_idx

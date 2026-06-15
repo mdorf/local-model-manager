@@ -39,7 +39,8 @@ def _default_command_builder(config: DaemonConfig):
                 metadata = read_gguf(m.shards[0]).metadata
                 cfg = recommend_config(m, metadata, detect_hardware(),
                                        supported=get_supported_flags() or None,
-                                       port=port, alias=m.path.stem)
+                                       port=port, alias=m.path.stem,
+                                       api_key=config.inference_key)
                 return ["llama-server", *cfg.flags], str(m.path)
         raise HTTPException(status_code=404, detail="model not found")
     return build

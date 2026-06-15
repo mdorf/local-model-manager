@@ -63,9 +63,11 @@ def cmd_serve(args: argparse.Namespace) -> int:
         print(f"Model not found: {args.model}")
         return 1
     metadata = read_gguf(model.shards[0]).metadata
+    inf_key = load_or_create_config().inference_key
     cfg = recommend_config(model, metadata, detect_hardware(),
                            supported=get_supported_flags() or None,
-                           port=args.port, alias=model.path.stem)
+                           port=args.port, alias=model.path.stem,
+                           api_key=inf_key)
     for w in cfg.warnings:
         print(f"warning: {w}")
     if cfg.fit.level == "wont_load":
@@ -109,7 +111,8 @@ def cmd_switch(args: argparse.Namespace) -> int:
     metadata = read_gguf(model.shards[0]).metadata
     cfg = recommend_config(model, metadata, detect_hardware(),
                            supported=get_supported_flags() or None,
-                           port=args.port, alias=model.path.stem)
+                           port=args.port, alias=model.path.stem,
+                           api_key=load_or_create_config().inference_key)
     for w in cfg.warnings:
         print(f"warning: {w}")
     mgr = ServerManager()
@@ -132,8 +135,9 @@ def cmd_bind(args: argparse.Namespace) -> int:
         return 1
     model_id = Path(args.model).stem
     base_url = f"http://{args.host}:{args.port}/v1"
+    api_key = args.api_key or load_or_create_config().inference_key
     info = hermes_bind(config_path, base_url=base_url, model_id=model_id,
-                       provider_name=args.provider_name)
+                       provider_name=args.provider_name, api_key=api_key)
     print(f"Bound {config_path} -> {info['provider']} / {info['model']} @ {info['base_url']}")
     print("note: reasoning models (e.g. Qwen3.6) need a generous max_tokens — "
           "set it in your Hermes client if replies come back empty.")
@@ -211,6 +215,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_bind.add_argument("--provider-name", default="local")
     p_bind.add_argument("--hermes-config", default=str(DEFAULT_HERMES_CONFIG),
                         help="path to the target Hermes config.yaml")
+    p_bind.add_argument("--api-key", default=None,
+                        help="inference key (default: this host's inference_key)")
     p_bind.set_defaults(func=cmd_bind)
 
     p_unbind = sub.add_parser("unbind", help="revert a Hermes config bound by lmm")

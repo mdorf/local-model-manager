@@ -10,10 +10,15 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 
+SHARED_STATE_DIR = Path("/Users/Shared/local-model-manager")
+
+
 def state_dir() -> Path:
     override = os.environ.get("LMM_STATE_DIR")
     if override:
         return Path(override)
+    if (SHARED_STATE_DIR / "daemon.json").exists():
+        return SHARED_STATE_DIR
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "local-model-manager"
     xdg = os.environ.get("XDG_STATE_HOME")

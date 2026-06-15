@@ -190,9 +190,11 @@ def cmd_install(args: argparse.Namespace) -> int:
         for c in cmds:
             subprocess.run(c, shell=True, check=critical)
 
-    # Ordered phases so the plist exists before bootstrap and daemon.json
-    # exists (in the shared dir) before the daemon starts.
+    # Ordered phases: the account must exist before anything chowns to it; the
+    # plist must exist before bootstrap; daemon.json (in the shared dir) before
+    # the daemon starts.
     Path(deploy.plist_install_path()).write_text(plist_xml)
+    _run(deploy.account_steps(user=args.user, uid=uid), critical=True)
     _run(deploy.shared_setup_steps(user=args.user, shared_dir=SHARED_DIR), critical=True)
     daemon_json = Path(SHARED_DIR) / "daemon.json"
     if not daemon_json.exists():
@@ -201,7 +203,6 @@ def cmd_install(args: argparse.Namespace) -> int:
             "token": secrets.token_hex(24),
             "inference_key": secrets.token_hex(24),
             "roots": [args.models_dir]}, indent=2))
-    _run(deploy.account_steps(user=args.user, uid=uid), critical=True)
     _run(deploy.acl_steps(user=args.user, models_dir=args.models_dir), critical=True)
     _run(deploy.shared_venv_steps(shared_dir=SHARED_DIR, project_dir=project_dir,
                                   user=args.user), critical=True)

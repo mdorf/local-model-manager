@@ -99,8 +99,9 @@ def install_steps(*, user: str, uid: int, host: str, port: int,
                   models_dir: str, shared_dir: str, project_dir: str) -> list[str]:
     exec_path = shared_venv_exec(shared_dir)
     return [
-        *shared_setup_steps(user=user, shared_dir=shared_dir),
+        # account must exist before anything chowns to it
         *account_steps(user=user, uid=uid),
+        *shared_setup_steps(user=user, shared_dir=shared_dir),
         *acl_steps(user=user, models_dir=models_dir),
         *shared_venv_steps(shared_dir=shared_dir, project_dir=project_dir, user=user),
         *plist_steps(user=user),

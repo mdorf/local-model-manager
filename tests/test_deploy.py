@@ -62,6 +62,17 @@ def test_install_steps_compose_all_phases():
     assert "uv venv" in joined
 
 
+def test_account_created_before_anything_chowns_to_it():
+    # regression: `chown _lmm:...` must not run before the _lmm account exists
+    steps = install_steps(user="_lmm", uid=251, host="127.0.0.1", port=8770,
+                          models_dir="/Users/Shared/models",
+                          shared_dir="/Users/Shared/local-model-manager",
+                          project_dir="/proj")
+    account_idx = next(i for i, s in enumerate(steps) if s == "dscl . -create /Users/_lmm")
+    chown_idx = next(i for i, s in enumerate(steps) if "chown" in s and "_lmm" in s)
+    assert account_idx < chown_idx
+
+
 def test_uninstall_steps_remove():
     joined = "\n".join(uninstall_steps(user="_lmm",
                                        models_dir="/Users/Shared/models",

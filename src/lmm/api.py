@@ -7,6 +7,7 @@ import threading
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from pydantic import BaseModel
 
 from lmm.daemonconfig import DaemonConfig
 from lmm.discovery import discover_models
@@ -16,6 +17,17 @@ from lmm.llama import get_supported_flags
 from lmm.models import Model
 from lmm.recommend import recommend_config
 from lmm.server import ServerInstance, ServerManager
+
+
+class StartServerRequest(BaseModel):
+    model: str
+    port: int | None = None
+    flags: list[str] | None = None
+
+
+class SwitchServerRequest(BaseModel):
+    model: str
+    port: int | None = None
 
 
 def _model_dict(m: Model) -> dict:
@@ -99,12 +111,9 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
                         "message": cfg.fit.message}}
 
     @app.post("/api/servers", dependencies=[Depends(auth)])
-    def start_server(body: dict):
-        model = body.get("model")
-        if not model:
-            raise HTTPException(status_code=400, detail="'model' is required")
-        port = int(body.get("port") or 8080)
-        command, model_path = app.state.command_builder(model, port)
+    def start_server(body: StartServerRequest):
+        port = body.port or 8080
+        command, model_path = app.state.command_builder(body.model, port)
         with app.state.lock:
             inst = app.state.manager.start(command, port=port, model_path=model_path)
         return _instance_dict(inst)
@@ -116,12 +125,9 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
         return {"stopped": ok, "port": port}
 
     @app.post("/api/servers/switch", dependencies=[Depends(auth)])
-    def switch_server(body: dict):
-        model = body.get("model")
-        if not model:
-            raise HTTPException(status_code=400, detail="'model' is required")
-        port = int(body.get("port") or 8080)
-        command, model_path = app.state.command_builder(model, port)
+    def switch_server(body: SwitchServerRequest):
+        port = body.port or 8080
+        command, model_path = app.state.command_builder(body.model, port)
         with app.state.lock:
             inst = app.state.manager.switch(command, port=port, model_path=model_path)
         return _instance_dict(inst)

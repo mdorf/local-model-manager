@@ -72,11 +72,21 @@ def shared_venv_exec(shared_dir: str) -> str:
 
 
 def shared_venv_steps(*, shared_dir: str, project_dir: str, user: str) -> list[str]:
+    sd = shlex.quote(shared_dir)
+    py_dir = f"{shared_dir}/python"
+    py_dir_q = shlex.quote(py_dir)
     venv = shlex.quote(f"{shared_dir}/venv")
+    venv_py = shlex.quote(f"{shared_dir}/venv/bin/python")
+    # Install a uv-managed Python INTO the shared tree so the service account
+    # can read the interpreter the venv links to (uv's default managed Python
+    # lives under the installing user's home, which _lmm cannot read).
     return [
-        f"uv venv {venv}",
-        f"uv pip install --python {shlex.quote(shared_dir + '/venv/bin/python')} {shlex.quote(project_dir)}",
-        f"chown -R {shlex.quote(user)}:staff {venv}",
+        f"UV_PYTHON_INSTALL_DIR={py_dir_q} uv python install 3.11",
+        f"UV_PYTHON_INSTALL_DIR={py_dir_q} uv venv --managed-python --python 3.11 {venv}",
+        f"uv pip install --python {venv_py} {shlex.quote(project_dir)}",
+        # Hand the whole shared tree (python + venv + daemon.json) to the
+        # service account so it can exec the daemon and read its state.
+        f"chown -R {shlex.quote(user)}:staff {sd}",
     ]
 
 

@@ -127,6 +127,27 @@ def test_shared_venv_steps():
     assert shared_venv_exec("/Users/Shared/local-model-manager").endswith("venv/bin/lmm")
 
 
+def test_shared_venv_uses_lmm_readable_python():
+    # regression: the venv must be built against a Python installed INSIDE the
+    # shared tree (readable by _lmm after chown), not uv's managed interpreter
+    # under misha's home (which _lmm cannot read -> launchd I/O error).
+    shared = "/Users/Shared/local-model-manager"
+    steps = shared_venv_steps(shared_dir=shared, project_dir="/proj", user="_lmm")
+    joined = "\n".join(steps)
+    # a Python is installed into the shared tree
+    assert "uv python install" in joined and "3.11" in joined
+    assert f"{shared}/python" in joined
+    # the venv is built from a uv-managed interpreter (not system/home python)
+    assert "uv venv" in joined and "--managed-python" in joined
+    # the whole shared tree is handed to the service account recursively
+    assert "chown -R" in joined and "_lmm:staff" in joined and shared in joined
+    # ordering: install python -> create venv -> chown
+    install_idx = next(i for i, s in enumerate(steps) if "uv python install" in s)
+    venv_idx = next(i for i, s in enumerate(steps) if "uv venv" in s)
+    chown_idx = next(i for i, s in enumerate(steps) if "chown -R" in s)
+    assert install_idx < venv_idx < chown_idx
+
+
 def test_uninstall_removes_acl_before_deleting_account():
     # regression: chmod -a "<user> allow ..." must run while the account still
     # resolves, i.e. BEFORE `dscl . -delete`, or it orphans a UUID ACL.

@@ -3,8 +3,10 @@ import plistlib
 from lmm.deploy import (
     LABEL,
     account_steps,
+    account_uid,
     acl_remove_steps,
     acl_steps,
+    existing_install_artifacts,
     find_free_service_uid,
     install_steps,
     launchd_plist,
@@ -151,6 +153,40 @@ def test_shared_venv_uses_lmm_readable_python():
     venv_idx = next(i for i, s in enumerate(steps) if "uv venv" in s)
     chown_idx = next(i for i, s in enumerate(steps) if "chown -R" in s)
     assert install_idx < venv_idx < chown_idx
+
+
+def test_shared_venv_clear_flag():
+    plain = "\n".join(shared_venv_steps(shared_dir="/s", project_dir="/p", user="_lmm"))
+    assert "--clear" not in plain
+    cleared = shared_venv_steps(shared_dir="/s", project_dir="/p", user="_lmm", clear=True)
+    venv_step = next(s for s in cleared if "uv venv" in s)
+    assert "--clear" in venv_step
+
+
+def test_install_steps_reinstall_adds_bootout_and_clear():
+    plain = "\n".join(install_steps(user="_lmm", uid=251, host="127.0.0.1", port=8770,
+                                    models_dir="/m", shared_dir="/s", project_dir="/p"))
+    assert "launchctl bootout" not in plain
+    reinst = install_steps(user="_lmm", uid=251, host="127.0.0.1", port=8770,
+                           models_dir="/m", shared_dir="/s", project_dir="/p",
+                           reinstall=True)
+    joined = "\n".join(reinst)
+    assert "launchctl bootout" in joined and "--clear" in joined
+    bootout_idx = next(i for i, s in enumerate(reinst) if "bootout" in s)
+    bootstrap_idx = next(i for i, s in enumerate(reinst) if "bootstrap" in s)
+    assert bootout_idx < bootstrap_idx
+
+
+def test_account_uid_returns_none_for_absent_user():
+    assert account_uid("_lmm_absent_test_xyz_12345") is None
+
+
+def test_existing_install_artifacts_returns_list(tmp_path):
+    # With a non-existent shared_dir and absent user, returns empty list.
+    result = existing_install_artifacts(user="_lmm_absent_test_xyz_12345",
+                                        shared_dir=str(tmp_path / "nonexistent"))
+    assert isinstance(result, list)
+    assert result == []
 
 
 def test_uninstall_removes_acl_before_deleting_account():

@@ -170,7 +170,8 @@ def cmd_install(args: argparse.Namespace) -> int:
     env = {"LMM_STATE_DIR": SHARED_DIR, "PATH": _DAEMON_PATH}
     steps = deploy.install_steps(user=args.user, uid=uid, host=args.host,
                                  port=args.port, models_dir=args.models_dir,
-                                 shared_dir=SHARED_DIR, project_dir=project_dir)
+                                 shared_dir=SHARED_DIR, project_dir=project_dir,
+                                 reinstall=args.reinstall)
     plist_xml = deploy.launchd_plist(exec_path=exec_path, host=args.host,
                                      port=args.port, user=args.user, env=env)
     if args.dry_run:
@@ -186,15 +187,28 @@ def cmd_install(args: argparse.Namespace) -> int:
               "(or preview with: lmm install --dry-run)")
         return 1
 
+    existing = deploy.existing_install_artifacts(user=args.user, shared_dir=SHARED_DIR)
+    if existing and not args.reinstall:
+        print(f"{deploy.LABEL} appears already installed: {', '.join(existing)}.")
+        print("Run `sudo lmm uninstall` first, or re-run with --reinstall to "
+              "replace it in place.")
+        return 1
+    existing_uid = deploy.account_uid(args.user)
+
     def _run(cmds, *, critical):
         for c in cmds:
             subprocess.run(c, shell=True, check=critical)
 
     # Ordered phases: the account must exist before anything chowns to it; the
     # plist must exist before bootstrap; daemon.json (in the shared dir) before
-    # the daemon starts.
+    # the daemon starts. On --reinstall, stop the running job first and reuse
+    # the existing account/UID (never reassign it).
+    if args.reinstall:
+        subprocess.run(f"launchctl bootout system {deploy.plist_install_path()}",
+                       shell=True, check=False)
     Path(deploy.plist_install_path()).write_text(plist_xml)
-    _run(deploy.account_steps(user=args.user, uid=uid), critical=True)
+    if existing_uid is None:
+        _run(deploy.account_steps(user=args.user, uid=uid), critical=True)
     _run(deploy.shared_setup_steps(user=args.user, shared_dir=SHARED_DIR), critical=True)
     daemon_json = Path(SHARED_DIR) / "daemon.json"
     if not daemon_json.exists():
@@ -205,7 +219,7 @@ def cmd_install(args: argparse.Namespace) -> int:
             "roots": [args.models_dir]}, indent=2))
     _run(deploy.acl_steps(user=args.user, models_dir=args.models_dir), critical=True)
     _run(deploy.shared_venv_steps(shared_dir=SHARED_DIR, project_dir=project_dir,
-                                  user=args.user), critical=True)
+                                  user=args.user, clear=args.reinstall), critical=True)
     _run(deploy.plist_steps(user=args.user), critical=True)
     _run(deploy.firewall_steps(exec_path=exec_path), critical=False)
     print(f"Installed {deploy.LABEL} (user={args.user}). "
@@ -308,6 +322,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_install.add_argument("--models-dir", default="/Users/Shared/models")
     p_install.add_argument("--project-dir", default=None,
                            help="source dir to install lmm from (default: repo root)")
+    p_install.add_argument("--reinstall", "--force", action="store_true",
+                           help="replace an existing install in place "
+                                "(bootout + rebuild venv, reuse account/UID)")
     p_install.set_defaults(func=cmd_install)
 
     p_uninstall = sub.add_parser("uninstall", help="remove the daemon system service (sudo)")

@@ -6,6 +6,7 @@ commands; `lmm install` executes the returned steps only when run as root.
 
 from __future__ import annotations
 
+import os
 import plistlib
 import shlex
 import subprocess
@@ -71,12 +72,17 @@ def shared_venv_exec(shared_dir: str) -> str:
     return f"{shared_dir}/venv/bin/lmm"
 
 
-def shared_venv_steps(*, shared_dir: str, project_dir: str, user: str) -> list[str]:
+def shared_venv_steps(*, shared_dir: str, project_dir: str, user: str,
+                      clear: bool = False) -> list[str]:
     sd = shlex.quote(shared_dir)
     py_dir = f"{shared_dir}/python"
     py_dir_q = shlex.quote(py_dir)
     venv = shlex.quote(f"{shared_dir}/venv")
     venv_py = shlex.quote(f"{shared_dir}/venv/bin/python")
+    # --clear lets a reinstall replace an existing venv (uv venv errors otherwise).
+    clear_flag = " --clear" if clear else ""
+    venv_cmd = (f"UV_PYTHON_INSTALL_DIR={py_dir_q} uv venv --managed-python "
+                f"--python 3.11{clear_flag} {venv}")
     # Install a uv-managed Python INTO the shared tree so the service account
     # can read the interpreter the venv links to (uv's default managed Python
     # lives under the installing user's home, which _lmm cannot read).
@@ -85,7 +91,7 @@ def shared_venv_steps(*, shared_dir: str, project_dir: str, user: str) -> list[s
         # would be a root-owned file in the installing user's ~/.local/bin); the
         # venv references the interpreter by its full path in the shared tree.
         f"UV_PYTHON_INSTALL_DIR={py_dir_q} uv python install --no-bin 3.11",
-        f"UV_PYTHON_INSTALL_DIR={py_dir_q} uv venv --managed-python --python 3.11 {venv}",
+        venv_cmd,
         f"uv pip install --python {venv_py} {shlex.quote(project_dir)}",
         # Hand the whole shared tree (python + venv + daemon.json) to the
         # service account so it can exec the daemon and read its state.
@@ -109,17 +115,24 @@ def firewall_steps(*, exec_path: str) -> list[str]:
 
 
 def install_steps(*, user: str, uid: int, host: str, port: int,
-                  models_dir: str, shared_dir: str, project_dir: str) -> list[str]:
+                  models_dir: str, shared_dir: str, project_dir: str,
+                  reinstall: bool = False) -> list[str]:
     exec_path = shared_venv_exec(shared_dir)
-    return [
+    steps: list[str] = []
+    if reinstall:
+        # stop the running job first so the plist bootstrap can re-load it
+        steps.append(f"launchctl bootout system {_PLIST_PATH}")
+    steps += [
         # account must exist before anything chowns to it
         *account_steps(user=user, uid=uid),
         *shared_setup_steps(user=user, shared_dir=shared_dir),
         *acl_steps(user=user, models_dir=models_dir),
-        *shared_venv_steps(shared_dir=shared_dir, project_dir=project_dir, user=user),
+        *shared_venv_steps(shared_dir=shared_dir, project_dir=project_dir,
+                           user=user, clear=reinstall),
         *plist_steps(user=user),
         *firewall_steps(exec_path=exec_path),
     ]
+    return steps
 
 
 def uninstall_steps(*, user: str, models_dir: str | None = None,
@@ -154,3 +167,29 @@ def find_free_service_uid(low: int = 250, high: int = 499) -> int:
         if uid not in used:
             return uid
     raise RuntimeError(f"no free service UID in [{low}, {high}]")
+
+
+def account_uid(user: str) -> int | None:
+    """Return <user>'s UniqueID via read-only dscl, or None if absent/unreadable."""
+    try:
+        r = subprocess.run(["dscl", ".", "-read", f"/Users/{user}", "UniqueID"],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    parts = r.stdout.split()
+    return int(parts[-1]) if parts and parts[-1].lstrip("-").isdigit() else None
+
+
+def existing_install_artifacts(*, user: str, shared_dir: str) -> list[str]:
+    """Read-only: which install artifacts already exist (for the re-run guard)."""
+    found: list[str] = []
+    if os.path.exists(_PLIST_PATH):
+        found.append("LaunchDaemon plist")
+    if os.path.exists(f"{shared_dir}/venv"):
+        found.append("shared venv")
+    uid = account_uid(user)
+    if uid is not None:
+        found.append(f"service account {user} (uid {uid})")
+    return found

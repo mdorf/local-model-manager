@@ -64,6 +64,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
     cfg = recommend_config(model, metadata, detect_hardware(),
                            supported=get_supported_flags() or None,
                            port=args.port, alias=model.path.stem)
+    for w in cfg.warnings:
+        print(f"warning: {w}")
     if cfg.fit.level == "wont_load":
         print(f"Refusing to start — {cfg.fit.message}")
         return 1
@@ -106,6 +108,8 @@ def cmd_switch(args: argparse.Namespace) -> int:
     cfg = recommend_config(model, metadata, detect_hardware(),
                            supported=get_supported_flags() or None,
                            port=args.port, alias=model.path.stem)
+    for w in cfg.warnings:
+        print(f"warning: {w}")
     mgr = ServerManager()
     command = ["llama-server", *cfg.flags]
     print(f"Switching to {model.path.name} on port {args.port}...")

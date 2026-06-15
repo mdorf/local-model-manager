@@ -95,6 +95,22 @@ def test_adopt_refuses_already_managed_port(mgr):
         assert all(r.port != port for r in mgr.list())
 
 
+def test_switch_same_port_succeeds(mgr):
+    # The real CLI `switch --port 8080` reuses the same port: stop then start
+    # on the identical port must succeed (listen socket freed on process exit).
+    port = pick_free_port(start=49850)
+    mgr.start(_fake_cmd(port), port=port, model_path="/m/a.gguf", ready_timeout=10.0)
+    inst = mgr.switch(_fake_cmd(port), port=port, model_path="/m/b.gguf",
+                      ready_timeout=10.0)
+    try:
+        assert inst.status == "ready"
+        recs = mgr.list()
+        assert [r.port for r in recs] == [port]          # exactly one, same port
+        assert recs[0].model_path == "/m/b.gguf"          # now the new model
+    finally:
+        mgr.stop(port)
+
+
 def test_status_marks_crashed_when_pid_gone(mgr):
     port = pick_free_port(start=49800)
     inst = mgr.start(_fake_cmd(port), port=port, model_path="/m/x.gguf",

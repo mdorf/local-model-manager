@@ -180,12 +180,32 @@ def cmd_token(args: argparse.Namespace) -> int:
     return 0
 
 
+def _detect_served_model(host: str, port: int) -> str | None:
+    """Ask the running server for the model id it advertises (its --alias)."""
+    import urllib.error
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://{host}:{port}/v1/models", timeout=5) as r:
+            data = json.loads(r.read() or "{}")
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    models = data.get("data") or []
+    return models[0].get("id") if models else None
+
+
 def cmd_bind(args: argparse.Namespace) -> int:
     config_path = Path(args.hermes_config)
     if not config_path.exists():
         print(f"Hermes config not found: {config_path}")
         return 1
-    model_id = Path(args.model).stem
+    if args.model:
+        model_id = Path(args.model).stem
+    else:
+        model_id = _detect_served_model(args.host, args.port)
+        if not model_id:
+            print(f"No running model detected on {args.host}:{args.port} — "
+                  "start one first, or pass the model name explicitly.")
+            return 1
     base_url = f"http://{args.host}:{args.port}/v1"
     api_key = args.api_key or load_or_create_config().inference_key
     info = hermes_bind(config_path, base_url=base_url, model_id=model_id,
@@ -346,7 +366,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_token.set_defaults(func=cmd_token)
 
     p_bind = sub.add_parser("bind", help="point a Hermes config at a local server")
-    p_bind.add_argument("model", help="model filename (or path); its stem is the served id")
+    p_bind.add_argument("model", nargs="?", default=None,
+                        help="model filename (its stem is the served id); "
+                             "omit to auto-detect the running model on --port")
     p_bind.add_argument("--port", type=int, default=8080)
     p_bind.add_argument("--host", default="127.0.0.1")
     p_bind.add_argument("--provider-name", default="local")

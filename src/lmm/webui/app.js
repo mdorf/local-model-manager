@@ -293,8 +293,10 @@ async function showConnect() {
 
       <div class="connect-section">
         <h4>Using Hermes</h4>
-        <p class="modal-sub">Run this once on the machine with Hermes — it updates your
-          <code>~/.hermes/config.yaml</code> to use this model:</p>
+        <p class="modal-sub">On <b>this host</b>, bind in one click:</p>
+        <button class="btn" id="btn-bind-now">Bind Hermes on this host</button>
+        <p class="modal-sub" style="margin-top:10px">On another machine, run this once
+          (updates that machine's <code>~/.hermes/config.yaml</code>):</p>
         <code class="block" id="conn-cmd">${esc(bindCmd)}</code>
         <button class="btn ghost" id="btn-copy-cmd">Copy command</button>
       </div>
@@ -334,6 +336,24 @@ async function showConnect() {
     navigator.clipboard.writeText(bindCmd).catch(() => {});
     overlay.querySelector("#btn-copy-cmd").textContent = "Copied!";
     setTimeout(() => { overlay.querySelector("#btn-copy-cmd").textContent = "Copy command"; }, 1500);
+  };
+
+  overlay.querySelector("#btn-bind-now").onclick = async () => {
+    const btn = overlay.querySelector("#btn-bind-now");
+    btn.disabled = true;
+    btn.textContent = "Binding…";
+    try {
+      const res = await api.bind({});
+      btn.textContent = "✓ Bound Hermes to " + (res.model || modelId);
+    } catch (e) {
+      btn.disabled = false;
+      if (e && e.code === 403) {
+        btn.textContent = "Only available on the host — use the command ↓";
+      } else {
+        btn.textContent = "Bind Hermes on this host";
+        showBanner(e && e.message ? "Bind failed: " + e.message : "Bind failed");
+      }
+    }
   };
 }
 

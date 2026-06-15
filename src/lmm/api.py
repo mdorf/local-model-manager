@@ -31,6 +31,19 @@ def _instance_dict(inst: ServerInstance) -> dict:
             "started_at": inst.started_at}
 
 
+def _default_command_builder(config: DaemonConfig):
+    def build(model_name: str, port: int):
+        for m in discover_models(config.roots):
+            if m.path.name == model_name or str(m.path) == model_name:
+                metadata = read_gguf(m.shards[0]).metadata
+                cfg = recommend_config(m, metadata, detect_hardware(),
+                                       supported=get_supported_flags() or None,
+                                       port=port, alias=m.path.stem)
+                return ["llama-server", *cfg.flags], str(m.path)
+        raise HTTPException(status_code=404, detail="model not found")
+    return build
+
+
 def _make_auth(config: DaemonConfig):
     def require_token(authorization: str | None = Header(default=None)):
         if not config.token:
@@ -45,7 +58,7 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
     app = FastAPI(title="local-model-manager")
     app.state.config = config
     app.state.manager = manager or ServerManager()
-    app.state.command_builder = command_builder
+    app.state.command_builder = command_builder or _default_command_builder(config)
     app.state.lock = threading.Lock()
     auth = _make_auth(config)
 
@@ -81,5 +94,33 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
                 "warnings": cfg.warnings,
                 "fit": {"level": cfg.fit.level, "fits": cfg.fit.fits,
                         "message": cfg.fit.message}}
+
+    @app.post("/api/servers", dependencies=[Depends(auth)])
+    def start_server(body: dict):
+        model = body.get("model")
+        if not model:
+            raise HTTPException(status_code=400, detail="'model' is required")
+        port = int(body.get("port") or 8080)
+        command, model_path = app.state.command_builder(model, port)
+        with app.state.lock:
+            inst = app.state.manager.start(command, port=port, model_path=model_path)
+        return _instance_dict(inst)
+
+    @app.delete("/api/servers/{port}", dependencies=[Depends(auth)])
+    def stop_server(port: int):
+        with app.state.lock:
+            ok = app.state.manager.stop(port)
+        return {"stopped": ok, "port": port}
+
+    @app.post("/api/servers/switch", dependencies=[Depends(auth)])
+    def switch_server(body: dict):
+        model = body.get("model")
+        if not model:
+            raise HTTPException(status_code=400, detail="'model' is required")
+        port = int(body.get("port") or 8080)
+        command, model_path = app.state.command_builder(model, port)
+        with app.state.lock:
+            inst = app.state.manager.switch(command, port=port, model_path=model_path)
+        return _instance_dict(inst)
 
     return app

@@ -224,8 +224,11 @@ async function showBind() {
     return;
   }
 
-  const port = servers[0] ? servers[0].port : 8080;
-  const modelArg = selected ? selected.model : "<model>";
+  // Bind to what's actually running (its filename's stem is the served id),
+  // falling back to the selected model when nothing is running yet.
+  const running = servers[0];
+  const port = running ? running.port : 8080;
+  const modelArg = running ? running.model : (selected ? selected.model : "<model>");
   const bindCmd = `lmm bind ${modelArg} --port ${port}`;
   const keyId = "bind-key-input";
 
@@ -237,6 +240,10 @@ async function showBind() {
       <div class="field">
         <label>Base URL (OpenAI-compatible)</label>
         <code id="bind-url">${esc(info.base_url || "—")}</code>
+      </div>
+      <div class="field">
+        <label>Model id (the <code>model</code> field)</label>
+        <code id="bind-model">${esc(info.model_id || "—")}</code>
       </div>
       <div class="field">
         <label>Inference key</label>
@@ -289,8 +296,9 @@ function onStream(msg) {
     const logView = document.getElementById("log-view");
     if (logView) {
       const div = document.createElement("div");
-      div.className = "log-line" + (/error|fatal|fail/i.test(msg.line) ? " err" : "");
-      div.textContent = msg.line;
+      const line = msg.line || "";
+      div.className = "log-line" + (/error|fatal|fail/i.test(line) ? " err" : "");
+      div.textContent = line;
       logView.appendChild(div);
       // Cap DOM lines at 500
       while (logView.children.length > 500) logView.removeChild(logView.firstChild);
@@ -366,7 +374,8 @@ function esc(s) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 // ── Entry point ───────────────────────────────────────────────────────

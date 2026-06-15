@@ -62,6 +62,9 @@ def discover_models(roots: list[str | Path]) -> list[Model]:
             log.warning("root not found, skipping: %s", root)
             continue
         by_dir: dict[Path, list[str]] = {}
+        # NOTE: rglob does not descend directory symlinks, so models reached
+        # only via a symlinked directory are not discovered. Symlink-following
+        # policy is intentionally deferred (see ROADMAP).
         for p in root.rglob("*.gguf"):
             # Don't treat sidecar-pattern files as candidate models at all
             if not _is_sidecar(p):

@@ -36,6 +36,27 @@ def test_attaches_sidecars(tmp_path):
     names = {p.name for p in main.sidecars}
     assert "mmproj-model.gguf" in names
     assert "template.jinja" in names
+    assert "mmproj-model.gguf" not in {m.path.name for m in models}
+
+
+def test_sidecar_only_dir_yields_no_models(tmp_path):
+    d = tmp_path / "only"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "mmproj-foo.gguf").write_bytes(b"GGUF")
+    (d / "chat.jinja").write_text("{{x}}")
+    assert discover_models([tmp_path]) == []
+
+
+def test_sidecar_attaches_to_all_models_in_dir(tmp_path):
+    d = tmp_path / "multi"
+    _write(d / "alpha.gguf")
+    _write(d / "beta.gguf")
+    (d / "shared.jinja").write_text("{{x}}")
+    models = discover_models([tmp_path])
+    names = {m.path.name for m in models}
+    assert names == {"alpha.gguf", "beta.gguf"}
+    for m in models:
+        assert "shared.jinja" in {p.name for p in m.sidecars}
 
 
 def test_skips_unreadable_without_crashing(tmp_path):

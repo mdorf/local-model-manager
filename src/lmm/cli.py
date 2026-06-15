@@ -7,6 +7,7 @@ import getpass
 import json
 import logging
 import os
+import pwd
 import secrets
 import subprocess
 import sys
@@ -259,6 +260,15 @@ def cmd_install(args: argparse.Namespace) -> int:
     if os.geteuid() != 0:
         print("install must run as root — re-run: sudo lmm install "
               "(or preview with: lmm install --dry-run)")
+        return 1
+    if user == "root":
+        print("refusing to run the daemon as root — run `sudo lmm install` as a "
+              "normal user, or pass --user <name>.")
+        return 1
+    try:
+        pwd.getpwnam(user)
+    except KeyError:
+        print(f"target user '{user}' does not exist — pass an existing --user.")
         return 1
 
     existing = deploy.existing_install_artifacts(shared_dir=SHARED_DIR)

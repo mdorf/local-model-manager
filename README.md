@@ -100,6 +100,8 @@ Verify: `sudo launchctl print system/com.local-model-manager.daemon` and `curl h
 
 **Security note:** the daemon runs as your user — so it can read your models without ACL setup and **bind Hermes for you in one click** from the web UI. It binds **loopback by default** (not exposed to the network), which keeps this low-risk for personal use. If you expose it to the LAN (`--host 0.0.0.0`, to share with other machines), note that a compromise of the network-facing daemon would carry your account's privileges; in that mode the inference port is API-key-gated. One-click bind is **loopback-only** (the daemon can only write the local host's `~/.hermes`); remote machines bind with the `lmm bind` command the UI shows.
 
+> **Upgrading from an early `_lmm`-based build?** Run that build's `sudo lmm uninstall` (or manually `sudo dscl . -delete /Users/_lmm` and strip the models-dir ACL) *before* installing this run-as-user version — the current uninstaller no longer manages the old service account.
+
 ## Development
 
 ```bash

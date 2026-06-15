@@ -255,8 +255,9 @@ function clearBusy() {
 }
 
 // ── "Connect an agent" modal ──────────────────────────────────────────
-// Connects an agent/app to the RUNNING model. The daemon can't write a user's
-// config (it runs as _lmm), so we hand over the command (Hermes) and the raw
+// Connects an agent/app to the RUNNING model. On the host (loopback) the daemon
+// runs as the user and binds Hermes in one click; for a remote machine it can't
+// write that machine's config, so we hand over the command (Hermes) and the raw
 // settings (any OpenAI-compatible app) to use locally.
 async function showConnect() {
   const running = servers[0];

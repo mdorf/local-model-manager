@@ -49,6 +49,24 @@ def test_uninstall_dry_run(capsys):
     assert "rm -rf" in out
 
 
+def test_install_refuses_root_user(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("LMM_STATE_DIR", str(tmp_path / "st"))
+    monkeypatch.setattr("os.geteuid", lambda: 0)
+    rc = cmd_install(build_parser().parse_args(
+        ["install", "--user", "root", "--project-dir", "/proj"]))
+    assert rc == 1
+    assert "root" in capsys.readouterr().out.lower()
+
+
+def test_install_refuses_nonexistent_user(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("LMM_STATE_DIR", str(tmp_path / "st"))
+    monkeypatch.setattr("os.geteuid", lambda: 0)
+    rc = cmd_install(build_parser().parse_args(
+        ["install", "--user", "no_such_user_xyz_123", "--project-dir", "/proj"]))
+    assert rc == 1
+    assert "does not exist" in capsys.readouterr().out.lower()
+
+
 def test_install_refuses_when_already_installed(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("LMM_STATE_DIR", str(tmp_path / "st"))
     monkeypatch.setenv("SUDO_USER", "misha")

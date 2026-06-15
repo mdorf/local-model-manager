@@ -3,7 +3,7 @@ name = "local-model-manager"
 version = "0.0.1"
 description = "Manage local llama.cpp model servers and bind agents to them"
 requires-python = ">=3.11"
-dependencies = ["fastapi>=0.110", "uvicorn>=0.29"]
+dependencies = ["fastapi>=0.110", "uvicorn>=0.29", "ruamel.yaml>=0.18"]
 
 [project.scripts]
 lmm = "lmm.cli:main"

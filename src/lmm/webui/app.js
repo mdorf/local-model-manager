@@ -51,9 +51,15 @@ function renderTopbar() {
   const running = servers[0];
   let statusHtml = "";
   if (running) {
+    // Reach the model server via the same host the UI is served from (works
+    // locally and over the LAN), on the running server's port.
+    const openUrl = `${location.protocol}//${location.hostname}:${running.port}/`;
     statusHtml = `
       <span class="status-label">running:</span>
       <span class="status-value">${esc(running.model)} :${running.port}</span>
+      <a class="btn ghost" href="${esc(openUrl)}" target="_blank" rel="noopener"
+         title="Open the model server's built-in page (${esc(openUrl)})"
+         style="padding:4px 10px;font-size:12px;text-decoration:none">Open server ↗</a>
       <button class="btn" id="btn-connect" style="padding:4px 10px;font-size:12px">Connect an agent…</button>
       <button class="btn danger" id="btn-stop" style="padding:4px 10px;font-size:12px">Stop</button>`;
   } else {

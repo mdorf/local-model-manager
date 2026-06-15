@@ -25,6 +25,7 @@ class DaemonConfig:
     host: str = "127.0.0.1"
     port: int = DEFAULT_PORT
     token: str = ""
+    inference_key: str = ""
     roots: list[str] = field(default_factory=_default_roots)
 
 
@@ -42,6 +43,7 @@ def load_or_create_config() -> DaemonConfig:
         host=data.get("host", "127.0.0.1"),
         port=int(data.get("port", DEFAULT_PORT)),
         token=data.get("token") or secrets.token_hex(24),
+        inference_key=data.get("inference_key") or secrets.token_hex(24),
         roots=data.get("roots") or _default_roots(),
     )
     path.parent.mkdir(parents=True, exist_ok=True)

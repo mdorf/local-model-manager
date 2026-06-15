@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+import os
+import secrets
+import subprocess
 import sys
 from pathlib import Path
 
+from lmm import deploy
 from lmm.daemonconfig import load_or_create_config
 from lmm.discovery import discover_models
 from lmm.gguf import read_gguf
@@ -63,9 +68,11 @@ def cmd_serve(args: argparse.Namespace) -> int:
         print(f"Model not found: {args.model}")
         return 1
     metadata = read_gguf(model.shards[0]).metadata
+    inf_key = load_or_create_config().inference_key
     cfg = recommend_config(model, metadata, detect_hardware(),
                            supported=get_supported_flags() or None,
-                           port=args.port, alias=model.path.stem)
+                           port=args.port, alias=model.path.stem,
+                           api_key=inf_key)
     for w in cfg.warnings:
         print(f"warning: {w}")
     if cfg.fit.level == "wont_load":
@@ -109,7 +116,8 @@ def cmd_switch(args: argparse.Namespace) -> int:
     metadata = read_gguf(model.shards[0]).metadata
     cfg = recommend_config(model, metadata, detect_hardware(),
                            supported=get_supported_flags() or None,
-                           port=args.port, alias=model.path.stem)
+                           port=args.port, alias=model.path.stem,
+                           api_key=load_or_create_config().inference_key)
     for w in cfg.warnings:
         print(f"warning: {w}")
     mgr = ServerManager()
@@ -132,8 +140,9 @@ def cmd_bind(args: argparse.Namespace) -> int:
         return 1
     model_id = Path(args.model).stem
     base_url = f"http://{args.host}:{args.port}/v1"
+    api_key = args.api_key or load_or_create_config().inference_key
     info = hermes_bind(config_path, base_url=base_url, model_id=model_id,
-                       provider_name=args.provider_name)
+                       provider_name=args.provider_name, api_key=api_key)
     print(f"Bound {config_path} -> {info['provider']} / {info['model']} @ {info['base_url']}")
     print("note: reasoning models (e.g. Qwen3.6) need a generous max_tokens — "
           "set it in your Hermes client if replies come back empty.")
@@ -147,6 +156,76 @@ def cmd_unbind(args: argparse.Namespace) -> int:
         print(f"Reverted {config_path} from its pre-bind backup.")
     else:
         print(f"No pre-bind backup found next to {config_path}; nothing to revert.")
+    return 0
+
+
+SHARED_DIR = "/Users/Shared/local-model-manager"
+_DAEMON_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+
+
+def cmd_install(args: argparse.Namespace) -> int:
+    project_dir = args.project_dir or str(Path(__file__).resolve().parents[2])
+    exec_path = deploy.shared_venv_exec(SHARED_DIR)
+    uid = args.uid or deploy.find_free_service_uid()
+    env = {"LMM_STATE_DIR": SHARED_DIR, "PATH": _DAEMON_PATH}
+    steps = deploy.install_steps(user=args.user, uid=uid, host=args.host,
+                                 port=args.port, models_dir=args.models_dir,
+                                 shared_dir=SHARED_DIR, project_dir=project_dir)
+    plist_xml = deploy.launchd_plist(exec_path=exec_path, host=args.host,
+                                     port=args.port, user=args.user, env=env)
+    if args.dry_run:
+        print(f"# would write {deploy.plist_install_path()} :")
+        print(plist_xml)
+        print(f"# would write {SHARED_DIR}/daemon.json (fresh token + inference_key)")
+        print("# would run (as root):")
+        for s in steps:
+            print(f"  {s}")
+        return 0
+    if os.geteuid() != 0:
+        print("install must run as root — re-run: sudo lmm install "
+              "(or preview with: lmm install --dry-run)")
+        return 1
+
+    def _run(cmds, *, critical):
+        for c in cmds:
+            subprocess.run(c, shell=True, check=critical)
+
+    # Ordered phases so the plist exists before bootstrap and daemon.json
+    # exists (in the shared dir) before the daemon starts.
+    Path(deploy.plist_install_path()).write_text(plist_xml)
+    _run(deploy.shared_setup_steps(user=args.user, shared_dir=SHARED_DIR), critical=True)
+    daemon_json = Path(SHARED_DIR) / "daemon.json"
+    if not daemon_json.exists():
+        daemon_json.write_text(json.dumps({
+            "host": args.host, "port": args.port,
+            "token": secrets.token_hex(24),
+            "inference_key": secrets.token_hex(24),
+            "roots": [args.models_dir]}, indent=2))
+    _run(deploy.account_steps(user=args.user, uid=uid), critical=True)
+    _run(deploy.acl_steps(user=args.user, models_dir=args.models_dir), critical=True)
+    _run(deploy.shared_venv_steps(shared_dir=SHARED_DIR, project_dir=project_dir,
+                                  user=args.user), critical=True)
+    _run(deploy.plist_steps(user=args.user), critical=True)
+    _run(deploy.firewall_steps(exec_path=exec_path), critical=False)
+    print(f"Installed {deploy.LABEL} (user={args.user}). "
+          f"Verify: sudo launchctl print system/{deploy.LABEL}")
+    return 0
+
+
+def cmd_uninstall(args: argparse.Namespace) -> int:
+    steps = deploy.uninstall_steps(user=args.user, models_dir=args.models_dir,
+                                   shared_dir=SHARED_DIR)
+    if args.dry_run:
+        print("# would run (as root):")
+        for s in steps:
+            print(f"  {s}")
+        return 0
+    if os.geteuid() != 0:
+        print("uninstall must run as root — re-run: sudo lmm uninstall")
+        return 1
+    for s in steps:
+        subprocess.run(s, shell=True, check=False)
+    print(f"Uninstalled {deploy.LABEL}.")
     return 0
 
 
@@ -211,11 +290,30 @@ def build_parser() -> argparse.ArgumentParser:
     p_bind.add_argument("--provider-name", default="local")
     p_bind.add_argument("--hermes-config", default=str(DEFAULT_HERMES_CONFIG),
                         help="path to the target Hermes config.yaml")
+    p_bind.add_argument("--api-key", default=None,
+                        help="inference key (default: this host's inference_key)")
     p_bind.set_defaults(func=cmd_bind)
 
     p_unbind = sub.add_parser("unbind", help="revert a Hermes config bound by lmm")
     p_unbind.add_argument("--hermes-config", default=str(DEFAULT_HERMES_CONFIG))
     p_unbind.set_defaults(func=cmd_unbind)
+
+    p_install = sub.add_parser("install", help="install the daemon as a system service (sudo)")
+    p_install.add_argument("--dry-run", action="store_true", help="print steps, do nothing")
+    p_install.add_argument("--user", default="_lmm", help="service account (default _lmm)")
+    p_install.add_argument("--uid", type=int, default=None, help="service UID (default: auto)")
+    p_install.add_argument("--host", default="127.0.0.1")
+    p_install.add_argument("--port", type=int, default=8770)
+    p_install.add_argument("--models-dir", default="/Users/Shared/models")
+    p_install.add_argument("--project-dir", default=None,
+                           help="source dir to install lmm from (default: repo root)")
+    p_install.set_defaults(func=cmd_install)
+
+    p_uninstall = sub.add_parser("uninstall", help="remove the daemon system service (sudo)")
+    p_uninstall.add_argument("--dry-run", action="store_true")
+    p_uninstall.add_argument("--user", default="_lmm")
+    p_uninstall.add_argument("--models-dir", default="/Users/Shared/models")
+    p_uninstall.set_defaults(func=cmd_uninstall)
 
     return parser
 

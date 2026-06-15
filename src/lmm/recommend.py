@@ -42,7 +42,8 @@ def recommend_config(model: Model, metadata: dict, hardware: HardwareInfo, *,
                      supported: set[str] | None = None,
                      cache_type: str = _DEFAULT_CACHE,
                      host: str = "127.0.0.1", port: int = 8080,
-                     alias: str | None = None) -> LaunchConfig:
+                     alias: str | None = None,
+                     api_key: str | None = None) -> LaunchConfig:
     weights = weights_bytes(model.shards)
     model_max = model.context_length or 8192
     context = choose_context(model.arch, metadata, weights, model_max,
@@ -56,6 +57,8 @@ def recommend_config(model: Model, metadata: dict, hardware: HardwareInfo, *,
     groups.append(["-fa", "on"])
     groups.append(["--cache-type-k", cache_type])
     groups.append(["--cache-type-v", cache_type])
+    if api_key:
+        groups.append(["--api-key", api_key])
     if model.has_mtp:
         groups.append(["--spec-type", "draft-mtp"])
         groups.append(["--spec-draft-n-max", "2"])

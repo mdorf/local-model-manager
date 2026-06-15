@@ -7,6 +7,7 @@ import logging
 import sys
 from pathlib import Path
 
+from lmm.daemonconfig import load_or_create_config
 from lmm.discovery import discover_models
 from lmm.gguf import read_gguf
 from lmm.hardware import detect_hardware
@@ -118,6 +119,23 @@ def cmd_switch(args: argparse.Namespace) -> int:
     return 0 if inst.status == "ready" else 1
 
 
+def cmd_token(args: argparse.Namespace) -> int:
+    print(load_or_create_config().token)
+    return 0
+
+
+def cmd_daemon(args: argparse.Namespace) -> int:
+    import uvicorn
+
+    from lmm.api import create_app
+    config = load_or_create_config()
+    host = args.host or config.host
+    port = args.port or config.port
+    print(f"Starting daemon on http://{host}:{port}  (auth token via: lmm token)")
+    uvicorn.run(create_app(config), host=host, port=port, log_level="info")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lmm", description="local-model-manager")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -151,6 +169,14 @@ def build_parser() -> argparse.ArgumentParser:
                           help="model root dir (repeatable); defaults to ~/models")
     p_switch.add_argument("--port", type=int, default=8080)
     p_switch.set_defaults(func=cmd_switch)
+
+    p_daemon = sub.add_parser("daemon", help="run the control-plane HTTP daemon")
+    p_daemon.add_argument("--host", default=None, help="bind host (default 127.0.0.1)")
+    p_daemon.add_argument("--port", type=int, default=None, help="bind port (default 8770)")
+    p_daemon.set_defaults(func=cmd_daemon)
+
+    p_token = sub.add_parser("token", help="print the daemon auth token")
+    p_token.set_defaults(func=cmd_token)
 
     return parser
 

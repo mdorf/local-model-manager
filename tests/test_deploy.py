@@ -137,8 +137,12 @@ def test_shared_venv_uses_lmm_readable_python():
     # a Python is installed into the shared tree
     assert "uv python install" in joined and "3.11" in joined
     assert f"{shared}/python" in joined
-    # the venv is built from a uv-managed interpreter (not system/home python)
-    assert "uv venv" in joined and "--managed-python" in joined
+    # the venv is built from a uv-managed interpreter (not system/home python),
+    # and the venv step itself points uv at the shared install dir (not just
+    # the install step) so the venv can't resolve a different managed Python.
+    venv_step = next(s for s in steps if "uv venv" in s)
+    assert "--managed-python" in venv_step
+    assert "UV_PYTHON_INSTALL_DIR" in venv_step and f"{shared}/python" in venv_step
     # the whole shared tree is handed to the service account recursively
     assert "chown -R" in joined and "_lmm:staff" in joined and shared in joined
     # ordering: install python -> create venv -> chown

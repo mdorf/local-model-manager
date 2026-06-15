@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import secrets
 import threading
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from lmm.daemonconfig import DaemonConfig
@@ -20,6 +23,15 @@ from lmm.models import Model
 from lmm.recommend import recommend_config
 from lmm.server import ServerInstance, ServerManager
 from lmm.state import state_dir
+
+
+_WEBUI_DIR = Path(__file__).parent / "webui"
+
+
+def _inject_token(html: str, token: str, client_host: str | None) -> str:
+    if client_host in ("127.0.0.1", "::1", "localhost") and token:
+        return html.replace("</head>", f'<script>window.LMM_TOKEN={json.dumps(token)}</script></head>', 1)
+    return html
 
 
 class StartServerRequest(BaseModel):
@@ -187,5 +199,14 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
                                     "servers": [_instance_dict(s) for s in app.state.manager.status()]})
         except Exception:
             return
+
+    @app.get("/", response_class=HTMLResponse)
+    def index(request: Request):
+        html = (_WEBUI_DIR / "index.html").read_text()
+        host = request.client.host if request.client else None
+        return HTMLResponse(_inject_token(html, config.token, host))
+
+    if _WEBUI_DIR.exists():
+        app.mount("/", StaticFiles(directory=str(_WEBUI_DIR)), name="webui")
 
     return app

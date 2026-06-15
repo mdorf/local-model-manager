@@ -1,6 +1,6 @@
-# tests/test_api_connection_info.py
+# tests/test_api_static.py
 from fastapi.testclient import TestClient
-from lmm.api import create_app
+from lmm.api import create_app, _inject_token
 from lmm.daemonconfig import DaemonConfig
 from lmm.server import ServerInstance
 
@@ -27,21 +27,16 @@ class FakeManager:
         return True
 
 
-def test_connection_info_with_running_server():
-    inst = ServerInstance(port=8080, pid=1, model_path="/models/Qwen3.6-27B-Q8_0.gguf",
-                          started_at=0.0, status="ready", external=False)
-    # base_url is a computed @property (http://127.0.0.1:<port>) -> connection-info adds /v1
-    cfg = DaemonConfig(token="t", inference_key="sekret", roots=["/x"])
-    app = create_app(cfg, manager=FakeManager([inst]), command_builder=lambda *a: None)
-    r = TestClient(app).get("/api/connection-info", headers={"Authorization": "Bearer t"})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["base_url"].endswith("/v1")
-    assert body["inference_key"] == "sekret"
-    assert body["model_id"] == "Qwen3.6-27B-Q8_0"
+def test_inject_token_only_for_loopback():
+    html = "<head></head><body></body>"
+    out = _inject_token(html, "tok", "127.0.0.1")
+    assert 'window.LMM_TOKEN="tok"' in out
+    assert _inject_token(html, "tok", "10.0.0.5") == html  # remote: untouched
 
 
-def test_connection_info_requires_token():
-    cfg = DaemonConfig(token="t", inference_key="sekret", roots=["/x"])
+def test_index_served():
+    cfg = DaemonConfig(token="t", roots=["/x"])
     app = create_app(cfg, manager=FakeManager(), command_builder=lambda *a: None)
-    assert TestClient(app).get("/api/connection-info").status_code == 401
+    r = TestClient(app).get("/")
+    assert r.status_code == 200
+    assert "<html" in r.text.lower()

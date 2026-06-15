@@ -15,14 +15,16 @@ class FakeManager:
         self.calls.append(("start", port, model_path))
         inst = ServerInstance(port=port, pid=4242, model_path=model_path,
                               started_at=0.0, status="ready", external=False)
-        self._inst.append(inst); return inst
+        self._inst.append(inst)
+        return inst
     def switch(self, command, *, port, model_path):
         self.calls.append(("switch", port, model_path))
         self._inst = []
         return self.start(command, port=port, model_path=model_path)
     def stop(self, port):
         self.calls.append(("stop", port))
-        self._inst = [i for i in self._inst if i.port != port]; return True
+        self._inst = [i for i in self._inst if i.port != port]
+        return True
 
 
 def fake_builder(model_name, port):

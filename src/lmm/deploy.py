@@ -1,7 +1,10 @@
 """Generate the launchd plist and the privileged install/uninstall steps.
 
-Pure generators + a read-only free-UID finder. Nothing here runs privileged
-commands; `lmm install` executes the returned steps only when run as root.
+Pure generators. Nothing here runs privileged commands; `lmm install` executes
+the returned steps only when run as root. The daemon runs as the **owning user**
+(not a dedicated service account), so no dscl account or models-dir ACL is
+needed — the user already owns/reads their own models, and the daemon can write
+the user's own `~/.hermes` for one-click binding.
 """
 
 from __future__ import annotations
@@ -9,7 +12,6 @@ from __future__ import annotations
 import os
 import plistlib
 import shlex
-import subprocess
 
 LABEL = "com.local-model-manager.daemon"
 _PLIST_PATH = f"/Library/LaunchDaemons/{LABEL}.plist"
@@ -37,32 +39,6 @@ def launchd_plist(*, exec_path: str, host: str, port: int, user: str,
     return plistlib.dumps(data).decode()
 
 
-def account_steps(*, user: str, uid: int) -> list[str]:
-    base = f"dscl . -create /Users/{user}"
-    return [
-        base,
-        f"{base} UserShell /usr/bin/false",
-        f'{base} RealName "Local Model Manager service"',
-        f"{base} UniqueID {uid}",
-        f"{base} PrimaryGroupID 1",
-        f"{base} NFSHomeDirectory /var/empty",
-        f"dscl . -create /Users/{user} IsHidden 1",
-        f"{base} Password '*'",
-    ]
-
-
-def acl_steps(*, user: str, models_dir: str) -> list[str]:
-    perms = ("read,execute,readattr,readextattr,readsecurity,list,search,"
-             "file_inherit,directory_inherit")
-    return [f'chmod -R +a "{user} allow {perms}" {shlex.quote(models_dir)}']
-
-
-def acl_remove_steps(*, user: str, models_dir: str) -> list[str]:
-    perms = ("read,execute,readattr,readextattr,readsecurity,list,search,"
-             "file_inherit,directory_inherit")
-    return [f'chmod -R -a "{user} allow {perms}" {shlex.quote(models_dir)}']
-
-
 def shared_setup_steps(*, user: str, shared_dir: str) -> list[str]:
     d = shlex.quote(shared_dir)
     return [f"mkdir -p {d}", f"chown {shlex.quote(user)}:staff {d}", f"chmod 2770 {d}"]
@@ -83,18 +59,14 @@ def shared_venv_steps(*, shared_dir: str, project_dir: str, user: str,
     clear_flag = " --clear" if clear else ""
     venv_cmd = (f"UV_PYTHON_INSTALL_DIR={py_dir_q} uv venv --managed-python "
                 f"--python 3.11{clear_flag} {venv}")
-    # Install a uv-managed Python INTO the shared tree so the service account
-    # can read the interpreter the venv links to (uv's default managed Python
-    # lives under the installing user's home, which _lmm cannot read).
+    # Install a uv-managed Python INTO the shared tree (built as root) so the
+    # interpreter the venv links to is readable after we chown the tree to the
+    # owning user — avoids depending on root's/anyone-else's Python location.
     return [
-        # --no-bin: don't drop a python3.11 shim into a bin dir (under sudo that
-        # would be a root-owned file in the installing user's ~/.local/bin); the
-        # venv references the interpreter by its full path in the shared tree.
+        # --no-bin: don't drop a python3.11 shim into a bin dir under sudo.
         f"UV_PYTHON_INSTALL_DIR={py_dir_q} uv python install --no-bin 3.11",
         venv_cmd,
         f"uv pip install --python {venv_py} {shlex.quote(project_dir)}",
-        # Hand the whole shared tree (python + venv + daemon.json) to the
-        # service account so it can exec the daemon and read its state.
         f"chown -R {shlex.quote(user)}:staff {sd}",
     ]
 
@@ -114,19 +86,15 @@ def firewall_steps(*, exec_path: str) -> list[str]:
     return [f"{fw} --add {shlex.quote(exec_path)}", f"{fw} --unblockapp {shlex.quote(exec_path)}"]
 
 
-def install_steps(*, user: str, uid: int, host: str, port: int,
-                  models_dir: str, shared_dir: str, project_dir: str,
-                  reinstall: bool = False) -> list[str]:
+def install_steps(*, user: str, host: str, port: int, shared_dir: str,
+                  project_dir: str, reinstall: bool = False) -> list[str]:
     exec_path = shared_venv_exec(shared_dir)
     steps: list[str] = []
     if reinstall:
         # stop the running job first so the plist bootstrap can re-load it
         steps.append(f"launchctl bootout system {_PLIST_PATH}")
     steps += [
-        # account must exist before anything chowns to it
-        *account_steps(user=user, uid=uid),
         *shared_setup_steps(user=user, shared_dir=shared_dir),
-        *acl_steps(user=user, models_dir=models_dir),
         *shared_venv_steps(shared_dir=shared_dir, project_dir=project_dir,
                            user=user, clear=reinstall),
         *plist_steps(user=user),
@@ -135,61 +103,21 @@ def install_steps(*, user: str, uid: int, host: str, port: int,
     return steps
 
 
-def uninstall_steps(*, user: str, models_dir: str | None = None,
-                    shared_dir: str | None = None) -> list[str]:
+def uninstall_steps(*, shared_dir: str | None = None) -> list[str]:
     steps = [
         f"launchctl bootout system {_PLIST_PATH}",
         f"rm -f {_PLIST_PATH}",
     ]
-    # Remove the models-dir ACL while the account still resolves; deleting the
-    # account first would leave an orphaned-UUID ACL on the dir + files.
-    if models_dir:
-        steps.extend(acl_remove_steps(user=user, models_dir=models_dir))
-    steps.append(f"dscl . -delete /Users/{user}")
     if shared_dir:
         steps.append(f"rm -rf {shlex.quote(shared_dir)}")
     return steps
 
 
-def find_free_service_uid(low: int = 250, high: int = 499) -> int:
-    """Return an unused UID in [low, high], scanning dscl read-only."""
-    used: set[int] = set()
-    try:
-        out = subprocess.run(["dscl", ".", "-list", "/Users", "UniqueID"],
-                             capture_output=True, text=True, timeout=10)
-        for line in out.stdout.splitlines():
-            parts = line.split()
-            if len(parts) >= 2 and parts[-1].lstrip("-").isdigit():
-                used.add(int(parts[-1]))
-    except (OSError, subprocess.SubprocessError):
-        pass
-    for uid in range(low, high + 1):
-        if uid not in used:
-            return uid
-    raise RuntimeError(f"no free service UID in [{low}, {high}]")
-
-
-def account_uid(user: str) -> int | None:
-    """Return <user>'s UniqueID via read-only dscl, or None if absent/unreadable."""
-    try:
-        r = subprocess.run(["dscl", ".", "-read", f"/Users/{user}", "UniqueID"],
-                           capture_output=True, text=True, timeout=10)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if r.returncode != 0:
-        return None
-    parts = r.stdout.split()
-    return int(parts[-1]) if parts and parts[-1].lstrip("-").isdigit() else None
-
-
-def existing_install_artifacts(*, user: str, shared_dir: str) -> list[str]:
+def existing_install_artifacts(*, shared_dir: str) -> list[str]:
     """Read-only: which install artifacts already exist (for the re-run guard)."""
     found: list[str] = []
     if os.path.exists(_PLIST_PATH):
         found.append("LaunchDaemon plist")
     if os.path.exists(f"{shared_dir}/venv"):
         found.append("shared venv")
-    uid = account_uid(user)
-    if uid is not None:
-        found.append(f"service account {user} (uid {uid})")
     return found

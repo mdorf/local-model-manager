@@ -29,3 +29,15 @@ def test_status_routes_through_daemon(monkeypatch, capsys):
                              "external": False}]})
     assert cmd_status(build_parser().parse_args(["status"])) == 0
     assert "8080" in capsys.readouterr().out
+
+def test_serve_surfaces_daemon_error_cleanly(monkeypatch, capsys):
+    # routed serve against a bad model → daemon 404 → clean message + exit 1 (no traceback)
+    monkeypatch.setattr(cli.daemon_client, "daemon_available",
+                        lambda: {"base": "http://h:8770", "token": "tk"})
+    def boom(*a, **k):
+        raise cli.daemon_client.DaemonError("daemon error 404: model not found")
+    monkeypatch.setattr(cli.daemon_client, "start", boom)
+    rc = cmd_serve(build_parser().parse_args(["serve", "missing.gguf"]))
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "404" in out and "model not found" in out

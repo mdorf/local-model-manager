@@ -6,6 +6,10 @@ import urllib.request
 from lmm.state import state_dir
 
 
+class DaemonError(Exception):
+    """A routed CLI request to the daemon failed (HTTP error or unreachable)."""
+
+
 def _info() -> dict | None:
     try:
         return json.loads((state_dir() / "daemon.json").read_text())
@@ -32,8 +36,18 @@ def _request(method: str, base: str, path: str, token: str, body: dict | None = 
     req = urllib.request.Request(
         f"{base}{path}", data=data, method=method,
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        raw = r.read()
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            raw = r.read()
+    except urllib.error.HTTPError as e:
+        detail = ""
+        try:
+            detail = (json.loads(e.read() or b"{}") or {}).get("detail", "")
+        except ValueError:
+            pass
+        raise DaemonError(f"daemon error {e.code}: {detail or e.reason}") from None
+    except urllib.error.URLError as e:
+        raise DaemonError(f"daemon unreachable: {e.reason}") from None
     return json.loads(raw) if raw else None
 
 

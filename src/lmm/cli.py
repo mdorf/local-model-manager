@@ -65,7 +65,11 @@ def _find_model(root, name):
 def cmd_serve(args: argparse.Namespace) -> int:
     d = daemon_client.daemon_available()
     if d:
-        out = daemon_client.start(d["base"], d["token"], args.model, args.port)
+        try:
+            out = daemon_client.start(d["base"], d["token"], args.model, args.port) or {}
+        except daemon_client.DaemonError as e:
+            print(e)
+            return 1
         print(f"Status: {out.get('status')}  (port {out.get('port')})")
         return 0 if out.get("status") == "ready" else 1
     # ---- existing direct-mode code unchanged below ----
@@ -95,7 +99,11 @@ def cmd_serve(args: argparse.Namespace) -> int:
 def cmd_stop(args: argparse.Namespace) -> int:
     d = daemon_client.daemon_available()
     if d:
-        out = daemon_client.stop(d["base"], d["token"], args.port)
+        try:
+            out = daemon_client.stop(d["base"], d["token"], args.port)
+        except daemon_client.DaemonError as e:
+            print(e)
+            return 1
         print(f"Stopped server on port {args.port}." if out and out.get("stopped")
               else f"No server on port {args.port}.")
         return 0
@@ -113,7 +121,11 @@ def cmd_stop(args: argparse.Namespace) -> int:
 def cmd_status(args: argparse.Namespace) -> int:
     d = daemon_client.daemon_available()
     if d:
-        servers = (daemon_client.status(d["base"], d["token"]) or {}).get("servers", [])
+        try:
+            servers = (daemon_client.status(d["base"], d["token"]) or {}).get("servers", [])
+        except daemon_client.DaemonError as e:
+            print(e)
+            return 1
         if not servers:
             print("No running servers.")
             return 0
@@ -135,7 +147,11 @@ def cmd_status(args: argparse.Namespace) -> int:
 def cmd_switch(args: argparse.Namespace) -> int:
     d = daemon_client.daemon_available()
     if d:
-        out = daemon_client.switch(d["base"], d["token"], args.model, args.port)
+        try:
+            out = daemon_client.switch(d["base"], d["token"], args.model, args.port) or {}
+        except daemon_client.DaemonError as e:
+            print(e)
+            return 1
         print(f"Status: {out.get('status')}  (port {out.get('port')})")
         return 0 if out.get("status") == "ready" else 1
     # ---- existing direct-mode code unchanged ----

@@ -35,3 +35,24 @@ def test_start_posts_body(monkeypatch):
     assert seen["url"].endswith("/api/servers") and seen["method"] == "POST"
     assert json.loads(seen["data"]) == {"model": "m.gguf", "port": 8080}
     assert seen["auth"] == "Bearer tk"
+
+def test_request_http_error_becomes_daemon_error(monkeypatch):
+    import urllib.error
+    import pytest
+    def boom(req, timeout=0):
+        raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {},
+                                     io.BytesIO(b'{"detail":"model not found"}'))
+    monkeypatch.setattr(dc.urllib.request, "urlopen", boom)
+    with pytest.raises(dc.DaemonError) as ei:
+        dc.start("http://h:8770", "tk", "missing.gguf", 8080)
+    msg = str(ei.value)
+    assert "404" in msg and "model not found" in msg
+
+def test_request_unreachable_becomes_daemon_error(monkeypatch):
+    import urllib.error
+    import pytest
+    def boom(req, timeout=0):
+        raise urllib.error.URLError("Connection refused")
+    monkeypatch.setattr(dc.urllib.request, "urlopen", boom)
+    with pytest.raises(dc.DaemonError):
+        dc.status("http://h:8770", "tk")

@@ -1,5 +1,6 @@
 # tests/test_daemon_client.py
-import json, io
+import io
+import json
 import lmm.daemon_client as dc
 
 class _Resp(io.BytesIO):
@@ -23,8 +24,10 @@ def test_daemon_available_none_when_no_file(monkeypatch, tmp_path):
 def test_start_posts_body(monkeypatch):
     seen = {}
     def fake_urlopen(req, timeout=0):
-        seen["url"] = req.full_url; seen["method"] = req.get_method()
-        seen["data"] = req.data; seen["auth"] = req.headers.get("Authorization")
+        seen["url"] = req.full_url
+        seen["method"] = req.get_method()
+        seen["data"] = req.data
+        seen["auth"] = req.headers.get("Authorization")
         return _Resp(b'{"port":8080,"status":"ready"}')
     monkeypatch.setattr(dc.urllib.request, "urlopen", fake_urlopen)
     out = dc.start("http://h:8770", "tk", "m.gguf", 8080)

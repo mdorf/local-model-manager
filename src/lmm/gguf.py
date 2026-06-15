@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import mmap
+import os
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,8 +41,11 @@ class _Reader:
 
     def string(self) -> str:
         (length,) = self.take("<Q")
-        s = self.mm[self.off:self.off + length].decode("utf-8", "replace")
-        self.off += length
+        end = self.off + length
+        if end > len(self.mm):
+            raise GGUFError(f"string length {length} exceeds buffer")
+        s = self.mm[self.off:end].decode("utf-8", "replace")
+        self.off = end
         return s
 
     def value(self, vtype: int):
@@ -65,7 +69,15 @@ class _Reader:
 
 def read_gguf(path: str | Path) -> GGUFInfo:
     path = Path(path)
-    with open(path, "rb") as f:
+    # Minimum valid GGUF header: magic(4) + version(4) + n_tensors(8) + n_kv(8) = 24 bytes
+    _MIN_HEADER = 24
+    try:
+        f = open(path, "rb")  # noqa: SIM115  (plain open — we manage lifetime manually)
+    except OSError as e:
+        raise GGUFError(f"{path}: cannot open file ({e})") from e
+    try:
+        if os.fstat(f.fileno()).st_size < _MIN_HEADER:
+            raise GGUFError(f"{path}: file too small to be a GGUF file")
         mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
         try:
             r = _Reader(mm)
@@ -89,7 +101,9 @@ def read_gguf(path: str | Path) -> GGUFInfo:
                 r.take("<Q")               # offset
                 tensor_names.append(name)
             return GGUFInfo(version=version, metadata=metadata, tensor_names=tensor_names)
-        except struct.error as e:
+        except (struct.error, ValueError) as e:
             raise GGUFError(f"{path}: truncated or malformed GGUF ({e})") from e
         finally:
             mm.close()
+    finally:
+        f.close()

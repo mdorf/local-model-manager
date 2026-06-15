@@ -10,23 +10,30 @@ def test_parser_has_install_uninstall():
     assert b.func is cmd_uninstall
 
 
-def test_install_dry_run_prints_steps_without_executing(monkeypatch, tmp_path, capsys):
+def test_install_dry_run_shows_shared_scheme(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("LMM_STATE_DIR", str(tmp_path / "st"))
     rc = cmd_install(build_parser().parse_args(
-        ["install", "--dry-run", "--exec", "/usr/local/bin/lmm",
-         "--models-dir", "/Users/Shared/models"]))
+        ["install", "--dry-run", "--project-dir", "/proj"]))
     out = capsys.readouterr().out
     assert rc == 0
-    assert "dscl . -create /Users/_lmm" in out
+    assert "/Users/Shared/local-model-manager" in out
+    assert "uv venv" in out
+    assert "LMM_STATE_DIR" in out
     assert "launchctl bootstrap" in out
-    assert "would run" in out.lower() or "dry" in out.lower()
+    assert "daemon.json" in out
 
 
 def test_install_without_root_refuses(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("LMM_STATE_DIR", str(tmp_path / "st"))
     monkeypatch.setattr("os.geteuid", lambda: 1000)
-    rc = cmd_install(build_parser().parse_args(
-        ["install", "--exec", "/usr/local/bin/lmm", "--models-dir", "/tmp/m"]))
+    rc = cmd_install(build_parser().parse_args(["install", "--project-dir", "/proj"]))
     out = capsys.readouterr().out.lower()
     assert rc == 1
     assert "sudo" in out or "root" in out
+
+
+def test_uninstall_dry_run(monkeypatch, tmp_path, capsys):
+    rc = cmd_uninstall(build_parser().parse_args(["uninstall", "--dry-run"]))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "launchctl bootout" in out

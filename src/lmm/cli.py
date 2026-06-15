@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
-import shutil
+import secrets
 import subprocess
 import sys
 from pathlib import Path
@@ -158,25 +159,24 @@ def cmd_unbind(args: argparse.Namespace) -> int:
     return 0
 
 
-def _resolve_exec(explicit):
-    return explicit or shutil.which("lmm")
+SHARED_DIR = "/Users/Shared/local-model-manager"
+_DAEMON_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
 
 def cmd_install(args: argparse.Namespace) -> int:
-    exec_path = _resolve_exec(args.exec)
-    if not exec_path:
-        print("Could not find the `lmm` executable. Pass --exec /path/to/lmm "
-              "(e.g. from `uv tool install`).")
-        return 1
+    project_dir = args.project_dir or str(Path(__file__).resolve().parents[2])
+    exec_path = deploy.shared_venv_exec(SHARED_DIR)
     uid = args.uid or deploy.find_free_service_uid()
-    steps = deploy.install_steps(exec_path=exec_path, user=args.user, uid=uid,
-                                 host=args.host, port=args.port,
-                                 models_dir=args.models_dir)
+    env = {"LMM_STATE_DIR": SHARED_DIR, "PATH": _DAEMON_PATH}
+    steps = deploy.install_steps(user=args.user, uid=uid, host=args.host,
+                                 port=args.port, models_dir=args.models_dir,
+                                 shared_dir=SHARED_DIR, project_dir=project_dir)
     plist_xml = deploy.launchd_plist(exec_path=exec_path, host=args.host,
-                                     port=args.port, user=args.user)
+                                     port=args.port, user=args.user, env=env)
     if args.dry_run:
         print(f"# would write {deploy.plist_install_path()} :")
         print(plist_xml)
+        print(f"# would write {SHARED_DIR}/daemon.json (fresh token + inference_key)")
         print("# would run (as root):")
         for s in steps:
             print(f"  {s}")
@@ -185,23 +185,44 @@ def cmd_install(args: argparse.Namespace) -> int:
         print("install must run as root — re-run: sudo lmm install "
               "(or preview with: lmm install --dry-run)")
         return 1
+
+    def _run(cmds, *, critical):
+        for c in cmds:
+            subprocess.run(c, shell=True, check=critical)
+
+    # Ordered phases so the plist exists before bootstrap and daemon.json
+    # exists (in the shared dir) before the daemon starts.
     Path(deploy.plist_install_path()).write_text(plist_xml)
-    for s in steps:
-        subprocess.run(s, shell=True, check=False)
-    print(f"Installed {deploy.LABEL}. Check: lmm status ; logs in /Library/Logs/local-model-manager")
+    _run(deploy.shared_setup_steps(user=args.user, shared_dir=SHARED_DIR), critical=True)
+    daemon_json = Path(SHARED_DIR) / "daemon.json"
+    if not daemon_json.exists():
+        daemon_json.write_text(json.dumps({
+            "host": args.host, "port": args.port,
+            "token": secrets.token_hex(24),
+            "inference_key": secrets.token_hex(24),
+            "roots": [args.models_dir]}, indent=2))
+    _run(deploy.account_steps(user=args.user, uid=uid), critical=True)
+    _run(deploy.acl_steps(user=args.user, models_dir=args.models_dir), critical=True)
+    _run(deploy.shared_venv_steps(shared_dir=SHARED_DIR, project_dir=project_dir,
+                                  user=args.user), critical=True)
+    _run(deploy.plist_steps(user=args.user), critical=True)
+    _run(deploy.firewall_steps(exec_path=exec_path), critical=False)
+    print(f"Installed {deploy.LABEL} (user={args.user}). "
+          f"Verify: sudo launchctl print system/{deploy.LABEL}")
     return 0
 
 
 def cmd_uninstall(args: argparse.Namespace) -> int:
-    if not args.dry_run and os.geteuid() != 0:
-        print("uninstall must run as root — re-run: sudo lmm uninstall")
-        return 1
-    steps = deploy.uninstall_steps(user=args.user)
+    steps = deploy.uninstall_steps(user=args.user, models_dir=args.models_dir,
+                                   shared_dir=SHARED_DIR)
     if args.dry_run:
         print("# would run (as root):")
         for s in steps:
             print(f"  {s}")
         return 0
+    if os.geteuid() != 0:
+        print("uninstall must run as root — re-run: sudo lmm uninstall")
+        return 1
     for s in steps:
         subprocess.run(s, shell=True, check=False)
     print(f"Uninstalled {deploy.LABEL}.")
@@ -281,15 +302,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_install.add_argument("--dry-run", action="store_true", help="print steps, do nothing")
     p_install.add_argument("--user", default="_lmm", help="service account (default _lmm)")
     p_install.add_argument("--uid", type=int, default=None, help="service UID (default: auto)")
-    p_install.add_argument("--exec", default=None, help="path to the lmm executable")
     p_install.add_argument("--host", default="127.0.0.1")
     p_install.add_argument("--port", type=int, default=8770)
     p_install.add_argument("--models-dir", default="/Users/Shared/models")
+    p_install.add_argument("--project-dir", default=None,
+                           help="source dir to install lmm from (default: repo root)")
     p_install.set_defaults(func=cmd_install)
 
     p_uninstall = sub.add_parser("uninstall", help="remove the daemon system service (sudo)")
     p_uninstall.add_argument("--dry-run", action="store_true")
     p_uninstall.add_argument("--user", default="_lmm")
+    p_uninstall.add_argument("--models-dir", default="/Users/Shared/models")
     p_uninstall.set_defaults(func=cmd_uninstall)
 
     return parser

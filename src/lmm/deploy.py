@@ -80,7 +80,7 @@ def shared_venv_steps(*, shared_dir: str, project_dir: str, user: str) -> list[s
     ]
 
 
-def _plist_steps(*, user: str) -> list[str]:
+def plist_steps(*, user: str) -> list[str]:
     return [
         f"mkdir -p {_LOG_DIR}",
         f"chown {shlex.quote(user)} {_LOG_DIR}",
@@ -103,7 +103,7 @@ def install_steps(*, user: str, uid: int, host: str, port: int,
         *account_steps(user=user, uid=uid),
         *acl_steps(user=user, models_dir=models_dir),
         *shared_venv_steps(shared_dir=shared_dir, project_dir=project_dir, user=user),
-        *_plist_steps(user=user),
+        *plist_steps(user=user),
         *firewall_steps(exec_path=exec_path),
     ]
 

@@ -74,7 +74,10 @@ def shared_venv_steps(*, shared_dir: str, project_dir: str, user: str,
 def plist_steps(*, user: str) -> list[str]:
     return [
         f"mkdir -p {_LOG_DIR}",
-        f"chown {shlex.quote(user)} {_LOG_DIR}",
+        # -R so pre-existing log files (e.g. from a prior install as a different
+        # user) are owned by the run-as user — else launchd can't open the
+        # StandardError/Out paths and the job dies with EX_CONFIG (78).
+        f"chown -R {shlex.quote(user)} {_LOG_DIR}",
         f"chown root:wheel {_PLIST_PATH}",
         f"chmod 644 {_PLIST_PATH}",
         f"launchctl bootstrap system {_PLIST_PATH}",

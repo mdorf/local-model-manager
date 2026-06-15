@@ -6,11 +6,20 @@ from lmm.deploy import (
     install_steps,
     launchd_plist,
     plist_install_path,
+    plist_steps,
     shared_setup_steps,
     shared_venv_exec,
     shared_venv_steps,
     uninstall_steps,
 )
+
+
+def test_plist_steps_chowns_log_dir_recursively():
+    # -R so a prior install's log files become writable by the run-as user
+    # (else launchd can't open StandardError/OutPath → EX_CONFIG).
+    joined = "\n".join(plist_steps(user="misha"))
+    assert "chown -R misha" in joined
+    assert "launchctl bootstrap" in joined
 
 
 def test_plist_has_required_keys():

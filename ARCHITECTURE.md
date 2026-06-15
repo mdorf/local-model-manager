@@ -97,6 +97,8 @@ The daemon reads the GGUF header directly (no extra deps needed) to extract arch
 
 ## 7. Security
 
+> **v1 update (2026-06-15) — daemon runs as the owning user, not `_lmm`.** §14's "dedicated service account by default" decision was reversed in v1: the daemon runs as the installing user (`$SUDO_USER` / `--user`). Rationale: it lets the daemon **bind the operator's `~/.hermes` in one click** and read the user's models without a service account or ACLs (which also retired a class of installer bugs). The security cost is contained because the daemon now binds **loopback by default** — it's only network-exposed if you opt into `--host 0.0.0.0`, and that mode is where the run-as-user tradeoff matters (a compromise would carry the user's privileges). One-click bind is **loopback-only** (the daemon can't write a remote machine's config); remote clients use the `lmm bind` command. A dedicated service account may return as an opt-in for hardened LAN deployments.
+
 - **Control plane** (`:8770`) is LAN-bound and **gated by a shared token**. Rationale: it spawns processes with user-supplied flags — the threat isn't the trusted users, it's everything *else* on the WiFi (guests/IoT/compromised devices). "My-LAN, not the-whole-network."
 - **Inference plane** (`:8080+`) gated by `llama-server --api-key`. **Use a secret distinct from the control token** so inference access can be shared without granting control.
 - Secrets stored in the host's app config dir, not world-readable; **never committed**. Clients store their copy locally.

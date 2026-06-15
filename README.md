@@ -84,7 +84,7 @@ All endpoints require `Authorization: Bearer <token>` except `/api/health`.
 
 ## Install as an always-on system daemon (macOS)
 
-The guided installer creates a least-privilege service account (`_lmm`), a shared state dir, a read-only ACL on your models dir, and a launchd `LaunchDaemon` that starts at boot and restarts on crash. It runs privileged steps, so it needs `sudo` (preview them first with `--dry-run`).
+The guided installer sets up a launchd `LaunchDaemon` that starts at boot and restarts on crash, **running as you** (the user who runs `sudo lmm install`, or `--user <name>`). It needs `sudo` for the privileged steps (preview them first with `--dry-run`).
 
 ```bash
 # root must be able to find uv + llama-server, hence the explicit PATH:
@@ -92,11 +92,13 @@ sudo env "PATH=$HOME/.local/bin:/opt/homebrew/bin:$PATH" \
   .venv/bin/lmm install --project-dir "$(pwd)" --models-dir /path/to/models
 
 sudo .venv/bin/lmm install --dry-run        # preview the exact privileged steps
-sudo .venv/bin/lmm install --reinstall      # rebuild in place (preserves the service account + token)
-sudo .venv/bin/lmm uninstall                # remove the daemon, account, and ACL cleanly
+sudo .venv/bin/lmm install --reinstall      # rebuild in place (keeps token + state)
+sudo .venv/bin/lmm uninstall                # remove the daemon + its state dir
 ```
 
 Verify: `sudo launchctl print system/com.local-model-manager.daemon` and `curl http://127.0.0.1:8770/api/health`.
+
+**Security note:** the daemon runs as your user — so it can read your models without ACL setup and **bind Hermes for you in one click** from the web UI. It binds **loopback by default** (not exposed to the network), which keeps this low-risk for personal use. If you expose it to the LAN (`--host 0.0.0.0`, to share with other machines), note that a compromise of the network-facing daemon would carry your account's privileges; in that mode the inference port is API-key-gated. One-click bind is **loopback-only** (the daemon can only write the local host's `~/.hermes`); remote machines bind with the `lmm bind` command the UI shows.
 
 ## Development
 

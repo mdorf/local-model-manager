@@ -11,6 +11,7 @@ from lmm.daemonconfig import load_or_create_config
 from lmm.discovery import discover_models
 from lmm.gguf import read_gguf
 from lmm.hardware import detect_hardware
+from lmm.hermes import DEFAULT_HERMES_CONFIG, bind as hermes_bind, unbind as hermes_unbind
 from lmm.llama import get_supported_flags
 from lmm.recommend import recommend_config
 from lmm.server import ServerManager
@@ -124,6 +125,31 @@ def cmd_token(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_bind(args: argparse.Namespace) -> int:
+    config_path = Path(args.hermes_config)
+    if not config_path.exists():
+        print(f"Hermes config not found: {config_path}")
+        return 1
+    model_id = Path(args.model).stem
+    base_url = f"http://{args.host}:{args.port}/v1"
+    info = hermes_bind(config_path, base_url=base_url, model_id=model_id,
+                       provider_name=args.provider_name)
+    print(f"Bound {config_path} -> {info['provider']} / {info['model']} @ {info['base_url']}")
+    print("note: reasoning models (e.g. Qwen3.6) need a generous max_tokens — "
+          "set it in your Hermes client if replies come back empty.")
+    print("revert with: lmm unbind --hermes-config " + str(config_path))
+    return 0
+
+
+def cmd_unbind(args: argparse.Namespace) -> int:
+    config_path = Path(args.hermes_config)
+    if hermes_unbind(config_path):
+        print(f"Reverted {config_path} from its pre-bind backup.")
+    else:
+        print(f"No pre-bind backup found next to {config_path}; nothing to revert.")
+    return 0
+
+
 def cmd_daemon(args: argparse.Namespace) -> int:
     import uvicorn
 
@@ -177,6 +203,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_token = sub.add_parser("token", help="print the daemon auth token")
     p_token.set_defaults(func=cmd_token)
+
+    p_bind = sub.add_parser("bind", help="point a Hermes config at a local server")
+    p_bind.add_argument("model", help="model filename (or path); its stem is the served id")
+    p_bind.add_argument("--port", type=int, default=8080)
+    p_bind.add_argument("--host", default="127.0.0.1")
+    p_bind.add_argument("--provider-name", default="local")
+    p_bind.add_argument("--hermes-config", default=str(DEFAULT_HERMES_CONFIG),
+                        help="path to the target Hermes config.yaml")
+    p_bind.set_defaults(func=cmd_bind)
+
+    p_unbind = sub.add_parser("unbind", help="revert a Hermes config bound by lmm")
+    p_unbind.add_argument("--hermes-config", default=str(DEFAULT_HERMES_CONFIG))
+    p_unbind.set_defaults(func=cmd_unbind)
 
     return parser
 

@@ -67,8 +67,42 @@ class _Reader:
         raise GGUFError(f"unsupported value type {vtype}")
 
 
+# Header parsing walks the entire token-vocab array + every tensor name to
+# advance the mmap cursor (~0.2s for a 27B model), and discover_models/recommend
+# re-read on every control-API call — so /api/models cost ~1.5s per refresh.
+# Cache parsed headers by (path, size, mtime_ns): an unchanged file is ~free; a
+# file whose size or mtime changed misses the cache and is re-parsed. Callers
+# treat GGUFInfo as read-only, so sharing the cached instance is safe.
+_CACHE: dict[tuple[str, int, int], GGUFInfo] = {}
+_CACHE_MAX = 128
+
+
+def clear_gguf_cache() -> None:
+    """Drop all cached headers (e.g. after a rescan, or for test isolation)."""
+    _CACHE.clear()
+
+
 def read_gguf(path: str | Path) -> GGUFInfo:
     path = Path(path)
+    key: tuple[str, int, int] | None = None
+    try:
+        st = os.stat(path)
+        key = (str(path), st.st_size, st.st_mtime_ns)
+    except OSError:
+        key = None  # let _parse_gguf's open() raise the canonical GGUFError
+    if key is not None:
+        cached = _CACHE.get(key)
+        if cached is not None:
+            return cached
+    info = _parse_gguf(path)
+    if key is not None:
+        if len(_CACHE) >= _CACHE_MAX:
+            _CACHE.clear()
+        _CACHE[key] = info
+    return info
+
+
+def _parse_gguf(path: Path) -> GGUFInfo:
     # Minimum valid GGUF header: magic(4) + version(4) + n_tensors(8) + n_kv(8) = 24 bytes
     _MIN_HEADER = 24
     try:

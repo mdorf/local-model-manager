@@ -57,8 +57,12 @@ def _isolate_shared_state_dir(monkeypatch, tmp_path):
     point SHARED_STATE_DIR at an absent path so a real install never leaks into
     state resolution. Tests that exercise resolution re-set it themselves.
     """
+    import lmm.gguf as gguf
     import lmm.state as state
     monkeypatch.setattr(state, "SHARED_STATE_DIR", tmp_path / "no-shared-state")
+    # The GGUF header cache is process-global; clear it so cached parses from a
+    # prior test can't leak across tests that reuse a path.
+    gguf.clear_gguf_cache()
     # Also pin LMM_STATE_DIR to a per-test tmp so state_dir() never resolves to a
     # real ~/Library/... dir holding a stray daemon.json (which would make the CLI
     # think a daemon is running). Resolution tests override/delenv this themselves.

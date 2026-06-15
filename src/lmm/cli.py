@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from pathlib import Path
 
 from lmm.discovery import discover_models
 
@@ -16,7 +17,7 @@ def cmd_models(args: argparse.Namespace) -> int:
         return 0
     for m in sorted(models, key=lambda x: (x.family, x.size_label, x.path.name)):
         flags = " ".join(f for f in ["MTP" if m.has_mtp else ""] if f)
-        ctx = f"{m.context_length // 1024}K" if m.context_length else "?"
+        ctx = f"{m.context_length // 1024}K" if m.context_length is not None else "?"
         print(f"{m.path.name}  [{m.arch} {m.size_label} {m.quant} ctx={ctx}] {flags}".rstrip())
     return 0
 
@@ -35,7 +36,6 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     args = build_parser().parse_args(argv)
     if getattr(args, "root", None) is None:
-        from pathlib import Path
         args.root = [str(Path.home() / "models")]
     return args.func(args)
 

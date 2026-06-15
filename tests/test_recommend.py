@@ -68,3 +68,14 @@ def test_recommend_drops_unsupported_flags_with_warning(tmp_path):
     cfg = recommend_config(m, _META, _hw(64), supported=supported)
     assert "--spec-type" not in cfg.flags
     assert any("spec-type" in w for w in cfg.warnings)
+
+
+def test_recommend_drops_only_the_unsupported_group(tmp_path):
+    # Removing only -ngl must drop that group alone; other groups survive.
+    m = _model(tmp_path, has_mtp=True, size_bytes=1000)
+    supported = _SUPPORTED - {"-ngl"}
+    cfg = recommend_config(m, _META, _hw(64), supported=supported)
+    assert "-ngl" not in cfg.flags
+    assert "999" not in cfg.flags                 # its value dropped with it
+    assert "--spec-type" in cfg.flags             # unrelated group unaffected
+    assert any("-ngl" in w for w in cfg.warnings)

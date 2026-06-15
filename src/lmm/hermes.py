@@ -48,3 +48,14 @@ def bind(config_path: str | Path, *, base_url: str, model_id: str,
     config_path.write_text(buf.getvalue())
     return {"provider": f"custom:{provider_name}", "model": model_id,
             "base_url": base_url, "config": str(config_path)}
+
+
+def unbind(config_path: str | Path) -> bool:
+    """Restore the config from the <config>.lmm-prev backup. Returns False if
+    no backup exists (nothing to revert)."""
+    config_path = Path(config_path)
+    backup = Path(str(config_path) + _BACKUP_SUFFIX)
+    if not backup.exists():
+        return False
+    config_path.write_text(backup.read_text())
+    return True

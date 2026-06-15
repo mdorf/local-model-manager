@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import logging
 import os
+import pwd
 import secrets
 import subprocess
 import sys
@@ -179,12 +181,32 @@ def cmd_token(args: argparse.Namespace) -> int:
     return 0
 
 
+def _detect_served_model(host: str, port: int) -> str | None:
+    """Ask the running server for the model id it advertises (its --alias)."""
+    import urllib.error
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://{host}:{port}/v1/models", timeout=5) as r:
+            data = json.loads(r.read() or "{}")
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    models = data.get("data") or []
+    return models[0].get("id") if models else None
+
+
 def cmd_bind(args: argparse.Namespace) -> int:
     config_path = Path(args.hermes_config)
     if not config_path.exists():
         print(f"Hermes config not found: {config_path}")
         return 1
-    model_id = Path(args.model).stem
+    if args.model:
+        model_id = Path(args.model).stem
+    else:
+        model_id = _detect_served_model(args.host, args.port)
+        if not model_id:
+            print(f"No running model detected on {args.host}:{args.port} — "
+                  "start one first, or pass the model name explicitly.")
+            return 1
     base_url = f"http://{args.host}:{args.port}/v1"
     api_key = args.api_key or load_or_create_config().inference_key
     info = hermes_bind(config_path, base_url=base_url, model_id=model_id,
@@ -206,21 +228,28 @@ def cmd_unbind(args: argparse.Namespace) -> int:
 
 
 SHARED_DIR = "/Users/Shared/local-model-manager"
-_DAEMON_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+_DAEMON_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+
+def _install_user(args: argparse.Namespace) -> str:
+    """The user the daemon runs as: --user, else the sudo invoker, else current."""
+    return args.user or os.environ.get("SUDO_USER") or getpass.getuser()
 
 
 def cmd_install(args: argparse.Namespace) -> int:
+    user = _install_user(args)
     project_dir = args.project_dir or str(Path(__file__).resolve().parents[2])
     exec_path = deploy.shared_venv_exec(SHARED_DIR)
-    uid = args.uid or deploy.find_free_service_uid()
-    env = {"LMM_STATE_DIR": SHARED_DIR, "PATH": _DAEMON_PATH}
-    steps = deploy.install_steps(user=args.user, uid=uid, host=args.host,
-                                 port=args.port, models_dir=args.models_dir,
+    # Run as the owning user: set HOME so the daemon resolves ~/.hermes (for
+    # one-click bind) and its state dir correctly.
+    env = {"LMM_STATE_DIR": SHARED_DIR, "HOME": f"/Users/{user}", "PATH": _DAEMON_PATH}
+    steps = deploy.install_steps(user=user, host=args.host, port=args.port,
                                  shared_dir=SHARED_DIR, project_dir=project_dir,
                                  reinstall=args.reinstall)
     plist_xml = deploy.launchd_plist(exec_path=exec_path, host=args.host,
-                                     port=args.port, user=args.user, env=env)
+                                     port=args.port, user=user, env=env)
     if args.dry_run:
+        print(f"# daemon will run as user: {user}")
         print(f"# would write {deploy.plist_install_path()} :")
         print(plist_xml)
         print(f"# would write {SHARED_DIR}/daemon.json (fresh token + inference_key)")
@@ -232,30 +261,34 @@ def cmd_install(args: argparse.Namespace) -> int:
         print("install must run as root — re-run: sudo lmm install "
               "(or preview with: lmm install --dry-run)")
         return 1
+    if user == "root":
+        print("refusing to run the daemon as root — run `sudo lmm install` as a "
+              "normal user, or pass --user <name>.")
+        return 1
+    try:
+        pwd.getpwnam(user)
+    except KeyError:
+        print(f"target user '{user}' does not exist — pass an existing --user.")
+        return 1
 
-    existing = deploy.existing_install_artifacts(user=args.user, shared_dir=SHARED_DIR)
+    existing = deploy.existing_install_artifacts(shared_dir=SHARED_DIR)
     if existing and not args.reinstall:
         print(f"{deploy.LABEL} appears already installed: {', '.join(existing)}.")
         print("Run `sudo lmm uninstall` first, or re-run with --reinstall to "
               "replace it in place.")
         return 1
-    existing_uid = deploy.account_uid(args.user)
 
     def _run(cmds, *, critical):
         for c in cmds:
             subprocess.run(c, shell=True, check=critical)
 
-    # Ordered phases: the account must exist before anything chowns to it; the
-    # plist must exist before bootstrap; daemon.json (in the shared dir) before
-    # the daemon starts. On --reinstall, stop the running job first and reuse
-    # the existing account/UID (never reassign it).
+    # Ordered phases: plist before bootstrap; daemon.json (in the shared dir,
+    # later chowned to the user by shared_venv_steps) before the daemon starts.
     if args.reinstall:
         subprocess.run(f"launchctl bootout system {deploy.plist_install_path()}",
                        shell=True, check=False)
     Path(deploy.plist_install_path()).write_text(plist_xml)
-    if existing_uid is None:
-        _run(deploy.account_steps(user=args.user, uid=uid), critical=True)
-    _run(deploy.shared_setup_steps(user=args.user, shared_dir=SHARED_DIR), critical=True)
+    _run(deploy.shared_setup_steps(user=user, shared_dir=SHARED_DIR), critical=True)
     daemon_json = Path(SHARED_DIR) / "daemon.json"
     if not daemon_json.exists():
         daemon_json.write_text(json.dumps({
@@ -263,19 +296,17 @@ def cmd_install(args: argparse.Namespace) -> int:
             "token": secrets.token_hex(24),
             "inference_key": secrets.token_hex(24),
             "roots": [args.models_dir]}, indent=2))
-    _run(deploy.acl_steps(user=args.user, models_dir=args.models_dir), critical=True)
     _run(deploy.shared_venv_steps(shared_dir=SHARED_DIR, project_dir=project_dir,
-                                  user=args.user, clear=args.reinstall), critical=True)
-    _run(deploy.plist_steps(user=args.user), critical=True)
+                                  user=user, clear=args.reinstall), critical=True)
+    _run(deploy.plist_steps(user=user), critical=True)
     _run(deploy.firewall_steps(exec_path=exec_path), critical=False)
-    print(f"Installed {deploy.LABEL} (user={args.user}). "
+    print(f"Installed {deploy.LABEL} (runs as user={user}). "
           f"Verify: sudo launchctl print system/{deploy.LABEL}")
     return 0
 
 
 def cmd_uninstall(args: argparse.Namespace) -> int:
-    steps = deploy.uninstall_steps(user=args.user, models_dir=args.models_dir,
-                                   shared_dir=SHARED_DIR)
+    steps = deploy.uninstall_steps(shared_dir=SHARED_DIR)
     if args.dry_run:
         print("# would run (as root):")
         for s in steps:
@@ -345,7 +376,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_token.set_defaults(func=cmd_token)
 
     p_bind = sub.add_parser("bind", help="point a Hermes config at a local server")
-    p_bind.add_argument("model", help="model filename (or path); its stem is the served id")
+    p_bind.add_argument("model", nargs="?", default=None,
+                        help="model filename (its stem is the served id); "
+                             "omit to auto-detect the running model on --port")
     p_bind.add_argument("--port", type=int, default=8080)
     p_bind.add_argument("--host", default="127.0.0.1")
     p_bind.add_argument("--provider-name", default="local")
@@ -361,22 +394,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_install = sub.add_parser("install", help="install the daemon as a system service (sudo)")
     p_install.add_argument("--dry-run", action="store_true", help="print steps, do nothing")
-    p_install.add_argument("--user", default="_lmm", help="service account (default _lmm)")
-    p_install.add_argument("--uid", type=int, default=None, help="service UID (default: auto)")
+    p_install.add_argument("--user", default=None,
+                           help="user to run the daemon as (default: the sudo invoker)")
     p_install.add_argument("--host", default="127.0.0.1")
     p_install.add_argument("--port", type=int, default=8770)
     p_install.add_argument("--models-dir", default="/Users/Shared/models")
     p_install.add_argument("--project-dir", default=None,
                            help="source dir to install lmm from (default: repo root)")
     p_install.add_argument("--reinstall", "--force", action="store_true",
-                           help="replace an existing install in place "
-                                "(bootout + rebuild venv, reuse account/UID)")
+                           help="replace an existing install in place (bootout + rebuild venv)")
     p_install.set_defaults(func=cmd_install)
 
     p_uninstall = sub.add_parser("uninstall", help="remove the daemon system service (sudo)")
     p_uninstall.add_argument("--dry-run", action="store_true")
-    p_uninstall.add_argument("--user", default="_lmm")
-    p_uninstall.add_argument("--models-dir", default="/Users/Shared/models")
     p_uninstall.set_defaults(func=cmd_uninstall)
 
     return parser

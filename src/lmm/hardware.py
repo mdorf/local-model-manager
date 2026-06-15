@@ -25,13 +25,18 @@ class HardwareInfo:
 
 
 def _sysctl_int(key: str) -> int | None:
-    try:
-        out = subprocess.run(["sysctl", "-n", key], capture_output=True,
-                             text=True, timeout=5)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    out_str = out.stdout.strip()
-    return int(out_str) if out_str.isdigit() else None
+    # Use the absolute path first: sysctl lives in /usr/sbin, which isn't on a
+    # launchd daemon's minimal PATH — relying on PATH made RAM read as 0 there.
+    for exe in ("/usr/sbin/sysctl", "sysctl"):
+        try:
+            out = subprocess.run([exe, "-n", key], capture_output=True,
+                                 text=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        out_str = out.stdout.strip()
+        if out_str.isdigit():
+            return int(out_str)
+    return None
 
 
 def detect_hardware() -> HardwareInfo:

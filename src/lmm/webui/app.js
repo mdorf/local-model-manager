@@ -8,6 +8,7 @@ let models = [];       // [{name, ...}]
 let wsState = "disconnected";
 let logLines = [];     // capped at 500 lines
 let busy = false;      // an action (start/switch/stop) is in flight
+let bound = { bound: false };   // is Hermes currently bound to the running server?
 
 // ── Token gate ────────────────────────────────────────────────────────
 function tokenGate() {
@@ -43,7 +44,13 @@ async function refresh() {
   const [modelsResp, serversResp] = await Promise.all([api.models(), api.servers()]);
   models = modelsResp.models;
   servers = serversResp.servers;
+  await refreshBindStatus();
   paint();
+}
+
+async function refreshBindStatus() {
+  try { bound = await api.bindStatus(); }
+  catch (e) { bound = { bound: false }; }
 }
 
 // ── Top status bar ────────────────────────────────────────────────────
@@ -54,9 +61,13 @@ function renderTopbar() {
     // Reach the model server via the same host the UI is served from (works
     // locally and over the LAN), on the running server's port.
     const openUrl = `${location.protocol}//${location.hostname}:${running.port}/`;
+    const boundBadge = bound.bound
+      ? `<span class="badge" title="Your Hermes is pointed at this server">✓ Hermes bound</span>`
+      : "";
     statusHtml = `
       <span class="status-label">running:</span>
       <span class="status-value">${esc(running.model)} :${running.port}</span>
+      ${boundBadge}
       <a class="btn ghost" href="${esc(openUrl)}" target="_blank" rel="noopener"
          title="Open the model server's built-in page (${esc(openUrl)})"
          style="padding:4px 10px;font-size:12px;text-decoration:none">Open server ↗</a>
@@ -255,8 +266,9 @@ function clearBusy() {
 }
 
 // ── "Connect an agent" modal ──────────────────────────────────────────
-// Connects an agent/app to the RUNNING model. The daemon can't write a user's
-// config (it runs as _lmm), so we hand over the command (Hermes) and the raw
+// Connects an agent/app to the RUNNING model. On the host (loopback) the daemon
+// runs as the user and binds Hermes in one click; for a remote machine it can't
+// write that machine's config, so we hand over the command (Hermes) and the raw
 // settings (any OpenAI-compatible app) to use locally.
 async function showConnect() {
   const running = servers[0];
@@ -293,8 +305,10 @@ async function showConnect() {
 
       <div class="connect-section">
         <h4>Using Hermes</h4>
-        <p class="modal-sub">Run this once on the machine with Hermes — it updates your
-          <code>~/.hermes/config.yaml</code> to use this model:</p>
+        <p class="modal-sub">On <b>this host</b>, bind in one click:</p>
+        <button class="btn" id="btn-bind-now">Bind Hermes on this host</button>
+        <p class="modal-sub" style="margin-top:10px">On another machine, run this once
+          (updates that machine's <code>~/.hermes/config.yaml</code>):</p>
         <code class="block" id="conn-cmd">${esc(bindCmd)}</code>
         <button class="btn ghost" id="btn-copy-cmd">Copy command</button>
       </div>
@@ -334,6 +348,26 @@ async function showConnect() {
     navigator.clipboard.writeText(bindCmd).catch(() => {});
     overlay.querySelector("#btn-copy-cmd").textContent = "Copied!";
     setTimeout(() => { overlay.querySelector("#btn-copy-cmd").textContent = "Copy command"; }, 1500);
+  };
+
+  overlay.querySelector("#btn-bind-now").onclick = async () => {
+    const btn = overlay.querySelector("#btn-bind-now");
+    btn.disabled = true;
+    btn.textContent = "Binding…";
+    try {
+      const res = await api.bind({});
+      btn.textContent = "✓ Bound Hermes to " + (res.model || modelId);
+      await refreshBindStatus();
+      paint();  // surfaces the "✓ Hermes bound" badge (modal lives on <body>, survives)
+    } catch (e) {
+      btn.disabled = false;
+      if (e && e.code === 403) {
+        btn.textContent = "Only available on the host — use the command ↓";
+      } else {
+        btn.textContent = "Bind Hermes on this host";
+        showBanner(e && e.message ? "Bind failed: " + e.message : "Bind failed");
+      }
+    }
   };
 }
 

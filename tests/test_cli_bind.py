@@ -51,3 +51,27 @@ def test_cmd_unbind(tmp_path):
     rc = cmd_unbind(build_parser().parse_args(["unbind", "--hermes-config", str(cfg)]))
     assert rc == 0
     assert cfg.read_text() == _SAMPLE
+
+
+def test_bind_autodetects_model_when_omitted(monkeypatch, tmp_path):
+    import lmm.cli as cli
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(_SAMPLE)
+    monkeypatch.setattr(cli, "_detect_served_model", lambda host, port: "Qwen3.6-27B-Q8_0")
+    rc = cmd_bind(build_parser().parse_args(
+        ["bind", "--port", "8080", "--hermes-config", str(cfg)]))
+    assert rc == 0
+    import ruamel.yaml
+    data = ruamel.yaml.YAML().load(cfg.read_text())
+    assert data["model"]["default"] == "Qwen3.6-27B-Q8_0"
+
+
+def test_bind_no_model_no_running_server_errors(monkeypatch, tmp_path, capsys):
+    import lmm.cli as cli
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(_SAMPLE)
+    monkeypatch.setattr(cli, "_detect_served_model", lambda host, port: None)
+    rc = cmd_bind(build_parser().parse_args(
+        ["bind", "--port", "8080", "--hermes-config", str(cfg)]))
+    assert rc == 1
+    assert "no running model" in capsys.readouterr().out.lower()

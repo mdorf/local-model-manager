@@ -13,8 +13,13 @@ async function req(method, path, body) {
                ...(body ? { "Content-Type": "application/json" } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (res.status === 401) { const e = new Error("unauthorized"); e.code = 401; throw e; }
-  if (!res.ok) throw new Error((await res.text()) || res.statusText);
+  if (!res.ok) {
+    let detail = "";
+    try { detail = await res.text(); } catch (e) { /* ignore */ }
+    const err = new Error(detail || res.statusText);
+    err.code = res.status;  // 401/403/409/… so callers can branch
+    throw err;
+  }
   return res.status === 204 ? null : res.json();
 }
 
@@ -26,6 +31,8 @@ export const api = {
   switch: (model, port) => req("POST", "/api/servers/switch", { model, port }),
   stop: (port) => req("DELETE", `/api/servers/${port}`),
   connectionInfo: () => req("GET", "/api/connection-info"),
+  bind: (body) => req("POST", "/api/bind", body || {}),
+  bindStatus: () => req("GET", "/api/bind-status"),
 };
 
 export function openStream(onMsg, onState) {

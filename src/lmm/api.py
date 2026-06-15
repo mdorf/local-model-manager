@@ -17,6 +17,7 @@ from lmm.daemonconfig import DaemonConfig
 from lmm.discovery import discover_models
 from lmm.gguf import read_gguf
 from lmm.hardware import detect_hardware
+from lmm.hermes import bind as hermes_bind
 from lmm.llama import get_supported_flags
 from lmm.logtail import read_log_tail, tail_new_lines
 from lmm.models import Model
@@ -44,6 +45,14 @@ class StartServerRequest(BaseModel):
 class SwitchServerRequest(BaseModel):
     model: str
     port: int | None = None
+
+
+class BindRequest(BaseModel):
+    provider_name: str = "local"
+    hermes_config: str | None = None  # default: the daemon user's ~/.hermes/config.yaml
+
+
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
 def _model_dict(m: Model) -> dict:
@@ -98,6 +107,15 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
     app.state.log_dir = state_dir() / "logs"
     auth = _make_auth(config)
 
+    @app.middleware("http")
+    async def _no_cache_ui_assets(request: Request, call_next):
+        # UI assets must revalidate so a reinstall's new JS/CSS is picked up
+        # without a manual hard-reload (StaticFiles alone allows heuristic caching).
+        response = await call_next(request)
+        if not request.url.path.startswith("/api"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     @app.get("/api/health")
     def health():
         return {"status": "ok"}
@@ -122,9 +140,11 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
         if model is None:
             raise HTTPException(status_code=404, detail="model not found")
         metadata = read_gguf(model.shards[0]).metadata
+        # 8080 = the default model-server port for the preview (config.port is
+        # the *daemon* control port, not where llama-server listens).
         cfg = recommend_config(model, metadata, detect_hardware(),
                                supported=get_supported_flags() or None,
-                               port=config.port, alias=model.path.stem)
+                               port=8080, alias=model.path.stem)
         return {"model": model.path.name, "context": cfg.context,
                 "cache_type": cfg.cache_type, "flags": cfg.flags,
                 "warnings": cfg.warnings,
@@ -170,6 +190,53 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
                 "inference_key": config.inference_key if lan else "",
                 "model_id": model_id}
 
+    @app.post("/api/bind", dependencies=[Depends(auth)])
+    def bind_hermes(body: BindRequest, request: Request):
+        # Loopback-only: the daemon (running as the owning user) can write that
+        # user's local ~/.hermes. It cannot write a remote client's machine, so
+        # remote callers use the `lmm bind` command instead.
+        client = request.client.host if request.client else None
+        if client not in _LOOPBACK_HOSTS:
+            raise HTTPException(status_code=403,
+                                detail="bind is only available to the local host operator")
+        running = app.state.manager.status()
+        inst = running[0] if running else None
+        if inst is None:
+            raise HTTPException(status_code=409, detail="no server is running to bind to")
+        model_id = Path(inst.model_path).stem
+        base_url = f"http://127.0.0.1:{inst.port}/v1"
+        lan = not is_loopback(config.host)
+        api_key = config.inference_key if lan else "local"  # keyless server ignores it
+        config_path = (Path(body.hermes_config) if body.hermes_config
+                       else Path.home() / ".hermes" / "config.yaml")
+        if not config_path.exists():
+            raise HTTPException(status_code=404, detail=f"Hermes config not found: {config_path}")
+        info = hermes_bind(config_path, base_url=base_url, model_id=model_id,
+                           provider_name=body.provider_name, api_key=api_key)
+        return {"bound": True, **info}
+
+    @app.get("/api/bind-status", dependencies=[Depends(auth)])
+    def bind_status(request: Request):
+        # Is the host operator's Hermes currently pointed at the running server?
+        client = request.client.host if request.client else None
+        if client not in _LOOPBACK_HOSTS:
+            return {"bound": False}
+        running = app.state.manager.list()  # records: no health probe (fast)
+        inst = running[0] if running else None
+        cfg_path = Path.home() / ".hermes" / "config.yaml"
+        if inst is None or not cfg_path.exists():
+            return {"bound": False, "model_id": None}
+        base = f"http://127.0.0.1:{inst.port}/v1"
+        try:
+            from ruamel.yaml import YAML
+            data = YAML().load(cfg_path.read_text()) or {}
+        except Exception:
+            return {"bound": False, "model_id": None}
+        model = data.get("model") or {}
+        is_bound = model.get("base_url") == base
+        return {"bound": bool(is_bound),
+                "model_id": model.get("default") if is_bound else None}
+
     SUBPROTO_PREFIX = "lmm.bearer."
 
     @app.websocket("/api/stream")
@@ -188,18 +255,21 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
 
         log_dir = Path(app.state.log_dir)
         offsets: dict[int, int] = {}
-        # initial tail of each running server's log
-        for inst in app.state.manager.status():
+        # status() does blocking /health probes — run it OFF the event loop
+        # (via a thread) so it can't stall every other request for ~seconds.
+        servers_now = await asyncio.to_thread(app.state.manager.status)
+        for inst in servers_now:
             path = log_dir / f"server-{inst.port}.log"
             for line in read_log_tail(path, max_lines=200):
                 await ws.send_json({"type": "log", "port": inst.port, "line": line})
             offsets[inst.port] = path.stat().st_size if path.exists() else 0
         await ws.send_json({"type": "status",
-                            "servers": [_instance_dict(s) for s in app.state.manager.status()]})
+                            "servers": [_instance_dict(s) for s in servers_now]})
         try:
             while True:
                 await asyncio.sleep(1.0)
-                for inst in app.state.manager.status():
+                servers_now = await asyncio.to_thread(app.state.manager.status)
+                for inst in servers_now:
                     path = log_dir / f"server-{inst.port}.log"
                     prev = offsets.get(inst.port, 0)
                     # log truncated/rotated (e.g. on switch) → restart from the top
@@ -209,7 +279,7 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
                     for line in lines:
                         await ws.send_json({"type": "log", "port": inst.port, "line": line})
                 await ws.send_json({"type": "status",
-                                    "servers": [_instance_dict(s) for s in app.state.manager.status()]})
+                                    "servers": [_instance_dict(s) for s in servers_now]})
         except Exception:
             return
 

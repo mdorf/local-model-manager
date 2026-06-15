@@ -7,6 +7,7 @@ let servers = [];      // [{port, model, status, ...}]
 let models = [];       // [{name, ...}]
 let wsState = "disconnected";
 let logLines = [];     // capped at 500 lines
+let busy = false;      // an action (start/switch/stop) is in flight
 
 // ── Token gate ────────────────────────────────────────────────────────
 function tokenGate() {
@@ -179,7 +180,7 @@ async function selectModel(name) {
 
 // ── Start / Switch ────────────────────────────────────────────────────
 async function doStart() {
-  if (!selected) return;
+  if (busy || !selected) return;
   const fit = selected.fit || {};
   if (fit.level === "wont_load") {
     if (!confirm(`This model will not fit in RAM (${fit.message || "insufficient memory"}). Start anyway?`)) return;
@@ -190,6 +191,9 @@ async function doStart() {
   const port = (servers[0] && servers[0].port) || 8080;
   const isRunning = servers.length > 0;
 
+  // Loading a model is slow (the daemon waits for /health + a smoke test before
+  // returning). Show progress and lock the controls; live logs stream below.
+  setBusy(isRunning ? `Switching to ${selected.model}…` : `Starting ${selected.model}…`);
   try {
     if (isRunning) {
       await api.switch(selected.model, port);
@@ -199,19 +203,49 @@ async function doStart() {
     await refresh();
   } catch (e) {
     handleError(e);
+  } finally {
+    clearBusy();
   }
 }
 
 // ── Stop ──────────────────────────────────────────────────────────────
 async function doStop() {
-  if (!servers[0]) return;
+  if (busy || !servers[0]) return;
   const port = servers[0].port;
+  setBusy("Stopping…");
   try {
     await api.stop(port);
     await refresh();
   } catch (e) {
     handleError(e);
+  } finally {
+    clearBusy();
   }
+}
+
+// ── Busy / progress indicator ─────────────────────────────────────────
+function setBusy(label) {
+  busy = true;
+  root.classList.add("busy");
+  let bar = document.getElementById("busy-bar");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "busy-bar";
+    bar.className = "busy-bar";
+    bar.innerHTML = `<div class="busy-label"></div><div class="track"></div>`;
+    document.body.appendChild(bar);
+  }
+  bar.querySelector(".busy-label").textContent = label;
+  // surface the streaming logs as live progress
+  const logView = document.getElementById("log-view");
+  if (logView) logView.scrollTop = logView.scrollHeight;
+}
+
+function clearBusy() {
+  busy = false;
+  root.classList.remove("busy");
+  const bar = document.getElementById("busy-bar");
+  if (bar) bar.remove();
 }
 
 // ── Bind modal ────────────────────────────────────────────────────────
@@ -344,15 +378,20 @@ function onStreamState(state) {
 }
 
 // ── Error banner ──────────────────────────────────────────────────────
-function showBanner(msg) {
+let _bannerTimer = null;
+function showBanner(msg, autoHide = true) {
   let b = document.getElementById("error-banner");
   if (!b) {
     b = document.createElement("div");
     b.id = "error-banner";
     b.className = "banner";
+    b.title = "click to dismiss";
+    b.onclick = hideBanner;
     document.body.appendChild(b);
   }
   b.textContent = msg;
+  if (_bannerTimer) clearTimeout(_bannerTimer);
+  if (autoHide) _bannerTimer = setTimeout(hideBanner, 8000);
 }
 function hideBanner() {
   const b = document.getElementById("error-banner");
@@ -365,7 +404,9 @@ function handleError(e) {
     tokenGate();
     return;
   }
-  throw e;  // re-throw so the main() catch can show the banner
+  // Event-driven callers (button clicks) are not inside main()'s try, so surface
+  // the error directly rather than throwing into an unhandled rejection.
+  showBanner((e && e.message) ? `Error: ${e.message}` : "Something went wrong");
 }
 
 // ── HTML escape ───────────────────────────────────────────────────────

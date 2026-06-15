@@ -88,6 +88,8 @@ class ServerManager:
                           ready_timeout=ready_timeout)
 
     def adopt(self, port: int) -> ServerInstance | None:
+        if any(r.port == port for r in load_instances()):
+            return None                      # already managed — don't clobber
         base = f"http://127.0.0.1:{port}"
         if not is_healthy(base):
             return None
@@ -104,7 +106,10 @@ class ServerManager:
             if r.external:
                 status = "ready" if is_healthy(f"http://127.0.0.1:{r.port}") else "stopped"
             elif not is_port_in_use(r.port):
-                # Port gone → server has exited (pid may still be a zombie)
+                # Port gone → server has exited (pid may still be a zombie).
+                # This port-first classification is safe because start() blocks
+                # on wait_for_health before persisting; a future concurrent
+                # daemon should special-case very-recently-started records.
                 status = "crashed"
             elif is_healthy(f"http://127.0.0.1:{r.port}"):
                 status = "ready"

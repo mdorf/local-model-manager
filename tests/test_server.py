@@ -81,6 +81,20 @@ def test_adopt_external_server(mgr):
         mgr.forget(port)
 
 
+def test_adopt_refuses_already_managed_port(mgr):
+    port = pick_free_port(start=49820)
+    mgr.start(_fake_cmd(port), port=port, model_path="/m/x.gguf", ready_timeout=10.0)
+    try:
+        # adopting a port we already manage must NOT clobber the managed record
+        assert mgr.adopt(port) is None
+        rec = next(r for r in mgr.list() if r.port == port)
+        assert rec.external is False
+        assert rec.model_path == "/m/x.gguf"
+    finally:
+        assert mgr.stop(port) is True          # real stop still works (no leak)
+        assert all(r.port != port for r in mgr.list())
+
+
 def test_status_marks_crashed_when_pid_gone(mgr):
     port = pick_free_port(start=49800)
     inst = mgr.start(_fake_cmd(port), port=port, model_path="/m/x.gguf",

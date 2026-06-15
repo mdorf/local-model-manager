@@ -48,6 +48,19 @@ def write_minimal_gguf(path: Path, metadata: dict, tensor_names: list[str]) -> P
     return path
 
 
+@pytest.fixture(autouse=True)
+def _isolate_shared_state_dir(monkeypatch, tmp_path):
+    """Keep the suite hermetic on hosts where the daemon is actually installed.
+
+    `state.state_dir()` resolves to /Users/Shared/local-model-manager when that
+    dir holds a daemon.json. The tests were written assuming a pristine host;
+    point SHARED_STATE_DIR at an absent path so a real install never leaks into
+    state resolution. Tests that exercise resolution re-set it themselves.
+    """
+    import lmm.state as state
+    monkeypatch.setattr(state, "SHARED_STATE_DIR", tmp_path / "no-shared-state")
+
+
 @pytest.fixture
 def qwen_like(tmp_path):
     """A Qwen3.6-style hybrid model with an MTP head."""

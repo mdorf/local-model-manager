@@ -181,12 +181,19 @@ def test_account_uid_returns_none_for_absent_user():
     assert account_uid("_lmm_absent_test_xyz_12345") is None
 
 
-def test_existing_install_artifacts_returns_list(tmp_path):
-    # With a non-existent shared_dir and absent user, returns empty list.
-    result = existing_install_artifacts(user="_lmm_absent_test_xyz_12345",
-                                        shared_dir=str(tmp_path / "nonexistent"))
-    assert isinstance(result, list)
-    assert result == []
+def test_existing_install_artifacts_detects_present_pieces(monkeypatch, tmp_path):
+    # Hermetic: drive both branches via monkeypatch rather than the live host
+    # (the real plist/account would otherwise leak in when a daemon is installed).
+    monkeypatch.setattr("os.path.exists", lambda p: False)
+    monkeypatch.setattr("lmm.deploy.account_uid", lambda user: None)
+    assert existing_install_artifacts(user="_lmm", shared_dir=str(tmp_path)) == []
+
+    monkeypatch.setattr("os.path.exists", lambda p: True)
+    monkeypatch.setattr("lmm.deploy.account_uid", lambda user: 250)
+    found = existing_install_artifacts(user="_lmm", shared_dir=str(tmp_path))
+    assert any("plist" in f for f in found)
+    assert any("venv" in f for f in found)
+    assert any("_lmm" in f and "250" in f for f in found)
 
 
 def test_uninstall_removes_acl_before_deleting_account():

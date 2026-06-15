@@ -17,6 +17,7 @@ from lmm.daemonconfig import DaemonConfig
 from lmm.discovery import discover_models
 from lmm.gguf import read_gguf
 from lmm.hardware import detect_hardware
+from lmm.hermes import bind as hermes_bind
 from lmm.llama import get_supported_flags
 from lmm.logtail import read_log_tail, tail_new_lines
 from lmm.models import Model
@@ -44,6 +45,14 @@ class StartServerRequest(BaseModel):
 class SwitchServerRequest(BaseModel):
     model: str
     port: int | None = None
+
+
+class BindRequest(BaseModel):
+    provider_name: str = "local"
+    hermes_config: str | None = None  # default: the daemon user's ~/.hermes/config.yaml
+
+
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
 def _model_dict(m: Model) -> dict:
@@ -169,6 +178,31 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
         return {"base_url": base_url,
                 "inference_key": config.inference_key if lan else "",
                 "model_id": model_id}
+
+    @app.post("/api/bind", dependencies=[Depends(auth)])
+    def bind_hermes(body: BindRequest, request: Request):
+        # Loopback-only: the daemon (running as the owning user) can write that
+        # user's local ~/.hermes. It cannot write a remote client's machine, so
+        # remote callers use the `lmm bind` command instead.
+        client = request.client.host if request.client else None
+        if client not in _LOOPBACK_HOSTS:
+            raise HTTPException(status_code=403,
+                                detail="bind is only available to the local host operator")
+        running = app.state.manager.status()
+        inst = running[0] if running else None
+        if inst is None:
+            raise HTTPException(status_code=409, detail="no server is running to bind to")
+        model_id = Path(inst.model_path).stem
+        base_url = f"http://127.0.0.1:{inst.port}/v1"
+        lan = not is_loopback(config.host)
+        api_key = config.inference_key if lan else "local"  # keyless server ignores it
+        config_path = (Path(body.hermes_config) if body.hermes_config
+                       else Path.home() / ".hermes" / "config.yaml")
+        if not config_path.exists():
+            raise HTTPException(status_code=404, detail=f"Hermes config not found: {config_path}")
+        info = hermes_bind(config_path, base_url=base_url, model_id=model_id,
+                           provider_name=body.provider_name, api_key=api_key)
+        return {"bound": True, **info}
 
     SUBPROTO_PREFIX = "lmm.bearer."
 

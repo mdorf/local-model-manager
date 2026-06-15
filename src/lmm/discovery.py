@@ -35,12 +35,9 @@ def _is_sidecar(path: Path) -> bool:
 def _sidecars(directory: Path, main_names: set[str]) -> list[Path]:
     """Collect sidecar files in *directory*.
 
-    A file is a sidecar if it matches the sidecar pattern (starts with 'mmproj'
-    or has a '.jinja' suffix). Sidecar-pattern files are included regardless of
-    whether they are also listed in main_names, because a .gguf that failed to
-    parse should still appear as a sidecar for the successfully-parsed neighbor.
-
-    Non-sidecar-pattern files that share a name with a main model are excluded.
+    A file is a sidecar if it is an 'mmproj*' file or has a '.jinja' suffix.
+    Non-sidecar '.gguf' files that are not in main_names are skipped; they are
+    either already tracked as a main model or are unreadable and were dropped.
     """
     out: list[Path] = []
     for p in sorted(directory.iterdir()):
@@ -73,9 +70,28 @@ def discover_models(roots: list[str | Path]) -> list[Model]:
                 # Ensure the directory is known even if it only has sidecars
                 by_dir.setdefault(p.parent, [])
         for directory, names in by_dir.items():
-            groups = collapse_shards(names)
-            main_names = set(groups.keys()) | {n for v in groups.values() for n in v}
-            for logical_name, shard_names in groups.items():
+            # Partition into shard-patterned files and standalone files.
+            # Standalones are always emitted as their own model, even when their
+            # name collides with the logical base of a shard group.
+            shard_members = [n for n in names if _SHARD_RE.match(n)]
+            standalones = [n for n in names if not _SHARD_RE.match(n)]
+
+            # Group shard members by base name.
+            shard_groups: dict[str, list[str]] = {}
+            for name in shard_members:
+                m = _SHARD_RE.match(name)
+                key = f"{m.group('base')}.gguf"  # type: ignore[union-attr]
+                shard_groups.setdefault(key, []).append(name)
+            shard_groups = {k: sorted(v) for k, v in shard_groups.items()}
+
+            main_names = (
+                set(shard_groups.keys())
+                | {n for v in shard_groups.values() for n in v}
+                | set(standalones)
+            )
+
+            # Emit each shard group as one model.
+            for logical_name, shard_names in shard_groups.items():
                 shard_paths = [directory / n for n in shard_names]
                 first = shard_paths[0]
                 try:
@@ -86,6 +102,20 @@ def discover_models(roots: list[str | Path]) -> list[Model]:
                 models.append(classify(
                     info, first,
                     shards=shard_paths,
+                    sidecars=_sidecars(directory, main_names),
+                ))
+
+            # Emit each standalone as its own model.
+            for name in standalones:
+                p = directory / name
+                try:
+                    info = read_gguf(p)
+                except (GGUFError, OSError) as e:
+                    log.warning("skipping unreadable model %s: %s", p, e)
+                    continue
+                models.append(classify(
+                    info, p,
+                    shards=[p],
                     sidecars=_sidecars(directory, main_names),
                 ))
     return models

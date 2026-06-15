@@ -68,3 +68,28 @@ def test_skips_unreadable_without_crashing(tmp_path):
 
 def test_missing_root_is_ignored(tmp_path):
     assert discover_models([tmp_path / "does-not-exist"]) == []
+
+
+def test_multishard_model_discovered_as_one(tmp_path):
+    d = tmp_path / "sharded"
+    _write(d / "big-00001-of-00002.gguf")
+    _write(d / "big-00002-of-00002.gguf")
+    models = discover_models([tmp_path])
+    assert len(models) == 1
+    m = models[0]
+    assert {p.name for p in m.shards} == {"big-00001-of-00002.gguf", "big-00002-of-00002.gguf"}
+
+
+def test_standalone_not_absorbed_by_colliding_shard_base(tmp_path):
+    d = tmp_path / "collide"
+    _write(d / "model.gguf")                      # standalone
+    _write(d / "model-00001-of-00002.gguf")       # shard set, same base name
+    _write(d / "model-00002-of-00002.gguf")
+    models = discover_models([tmp_path])
+    names = {m.path.name for m in models}
+    # the standalone model.gguf must still be surfaced (not silently dropped)
+    assert "model.gguf" in names
+    # and the shard set is surfaced as its own model (2 models total)
+    assert len(models) == 2
+    shard_model = [m for m in models if m.path.name != "model.gguf"][0]
+    assert {p.name for p in shard_model.shards} == {"model-00001-of-00002.gguf", "model-00002-of-00002.gguf"}

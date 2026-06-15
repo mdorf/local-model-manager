@@ -156,7 +156,8 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
             base_url = inst.base_url.rstrip("/") + "/v1"
             model_id = Path(inst.model_path).stem
         else:
-            base_url = f"http://{config.host}:8080/v1"
+            host = config.host if config.host not in ("0.0.0.0", "::") else "127.0.0.1"
+            base_url = f"http://{host}:8080/v1"
             model_id = None
         return {"base_url": base_url, "inference_key": config.inference_key,
                 "model_id": model_id}
@@ -192,7 +193,11 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
                 await asyncio.sleep(1.0)
                 for inst in app.state.manager.status():
                     path = log_dir / f"server-{inst.port}.log"
-                    lines, offsets[inst.port] = tail_new_lines(path, offsets.get(inst.port, 0))
+                    prev = offsets.get(inst.port, 0)
+                    # log truncated/rotated (e.g. on switch) → restart from the top
+                    if path.exists() and path.stat().st_size < prev:
+                        prev = 0
+                    lines, offsets[inst.port] = tail_new_lines(path, prev)
                     for line in lines:
                         await ws.send_json({"type": "log", "port": inst.port, "line": line})
                 await ws.send_json({"type": "status",

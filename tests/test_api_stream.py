@@ -55,6 +55,7 @@ def test_stream_rejects_bad_token(tmp_path):
     client = TestClient(app)
     import pytest
     from starlette.websockets import WebSocketDisconnect
-    with pytest.raises((WebSocketDisconnect, Exception)):
-        with client.websocket_connect("/api/stream", subprotocols=["lmm.bearer.WRONG"]):
-            pass
+    # airtight: connection is closed (1008) with NO frame leaked before close
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/api/stream", subprotocols=["lmm.bearer.WRONG"]) as ws:
+            ws.receive_json()

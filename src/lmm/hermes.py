@@ -24,7 +24,9 @@ def bind(config_path: str | Path, *, base_url: str, model_id: str,
     """
     config_path = Path(config_path)
     original = config_path.read_text()
-    Path(str(config_path) + _BACKUP_SUFFIX).write_text(original)
+    backup = Path(str(config_path) + _BACKUP_SUFFIX)
+    if not backup.exists():
+        backup.write_text(original)   # preserve the pristine pre-lmm config across re-binds
 
     yaml = _yaml()
     data = yaml.load(original) or {}

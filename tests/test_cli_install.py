@@ -60,3 +60,34 @@ def test_install_refuses_when_already_installed(monkeypatch, tmp_path, capsys):
     assert "already installed" in out
     assert "reinstall" in out
     assert calls == []  # guard returned before any mutation
+
+
+def test_install_reinstall_skips_account_and_boots_out_first(monkeypatch, tmp_path):
+    # regression: the UID-reassignment fix lives in cmd_install's imperative
+    # path (skip account_steps when the account already exists). Pin it: on
+    # --reinstall with an existing account, NO `dscl . -create` is issued, and
+    # the running job is booted out before the plist is rewritten/bootstrapped.
+    monkeypatch.setenv("LMM_STATE_DIR", str(tmp_path / "st"))
+    monkeypatch.setattr("os.geteuid", lambda: 0)
+    monkeypatch.setattr("lmm.deploy.existing_install_artifacts",
+                        lambda **kw: ["service account _lmm (uid 250)"])
+    monkeypatch.setattr("lmm.deploy.account_uid", lambda user: 250)
+    events = []
+
+    class _R:
+        returncode = 0
+
+    monkeypatch.setattr("subprocess.run",
+                        lambda cmd, *a, **k: events.append(("run", cmd)) or _R())
+    monkeypatch.setattr("pathlib.Path.write_text",
+                        lambda self, *a, **k: events.append(("write", str(self))))
+    rc = cmd_install(build_parser().parse_args(
+        ["install", "--reinstall", "--user", "_lmm", "--uid", "250",
+         "--project-dir", "/proj"]))
+    assert rc == 0
+    # account reused, never recreated -> UID can't be reassigned
+    assert not any(kind == "run" and "dscl . -create" in cmd for kind, cmd in events)
+    bootout_i = next(i for i, (k, c) in enumerate(events) if k == "run" and "bootout" in c)
+    write_i = next(i for i, (k, c) in enumerate(events) if k == "write" and c.endswith(".plist"))
+    bootstrap_i = next(i for i, (k, c) in enumerate(events) if k == "run" and "bootstrap" in c)
+    assert bootout_i < write_i < bootstrap_i

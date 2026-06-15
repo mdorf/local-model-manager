@@ -8,6 +8,7 @@ let models = [];       // [{name, ...}]
 let wsState = "disconnected";
 let logLines = [];     // capped at 500 lines
 let busy = false;      // an action (start/switch/stop) is in flight
+let bound = { bound: false };   // is Hermes currently bound to the running server?
 
 // ── Token gate ────────────────────────────────────────────────────────
 function tokenGate() {
@@ -43,7 +44,13 @@ async function refresh() {
   const [modelsResp, serversResp] = await Promise.all([api.models(), api.servers()]);
   models = modelsResp.models;
   servers = serversResp.servers;
+  await refreshBindStatus();
   paint();
+}
+
+async function refreshBindStatus() {
+  try { bound = await api.bindStatus(); }
+  catch (e) { bound = { bound: false }; }
 }
 
 // ── Top status bar ────────────────────────────────────────────────────
@@ -54,9 +61,13 @@ function renderTopbar() {
     // Reach the model server via the same host the UI is served from (works
     // locally and over the LAN), on the running server's port.
     const openUrl = `${location.protocol}//${location.hostname}:${running.port}/`;
+    const boundBadge = bound.bound
+      ? `<span class="badge" title="Your Hermes is pointed at this server">✓ Hermes bound</span>`
+      : "";
     statusHtml = `
       <span class="status-label">running:</span>
       <span class="status-value">${esc(running.model)} :${running.port}</span>
+      ${boundBadge}
       <a class="btn ghost" href="${esc(openUrl)}" target="_blank" rel="noopener"
          title="Open the model server's built-in page (${esc(openUrl)})"
          style="padding:4px 10px;font-size:12px;text-decoration:none">Open server ↗</a>
@@ -346,6 +357,8 @@ async function showConnect() {
     try {
       const res = await api.bind({});
       btn.textContent = "✓ Bound Hermes to " + (res.model || modelId);
+      await refreshBindStatus();
+      paint();  // surfaces the "✓ Hermes bound" badge (modal lives on <body>, survives)
     } catch (e) {
       btn.disabled = false;
       if (e && e.code === 403) {

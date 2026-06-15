@@ -32,6 +32,7 @@ export const api = {
   stop: (port) => req("DELETE", `/api/servers/${port}`),
   connectionInfo: () => req("GET", "/api/connection-info"),
   bind: (body) => req("POST", "/api/bind", body || {}),
+  bindStatus: () => req("GET", "/api/bind-status"),
 };
 
 export function openStream(onMsg, onState) {

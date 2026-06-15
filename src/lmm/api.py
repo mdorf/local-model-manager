@@ -107,6 +107,15 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
     app.state.log_dir = state_dir() / "logs"
     auth = _make_auth(config)
 
+    @app.middleware("http")
+    async def _no_cache_ui_assets(request: Request, call_next):
+        # UI assets must revalidate so a reinstall's new JS/CSS is picked up
+        # without a manual hard-reload (StaticFiles alone allows heuristic caching).
+        response = await call_next(request)
+        if not request.url.path.startswith("/api"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     @app.get("/api/health")
     def health():
         return {"status": "ok"}
@@ -206,6 +215,28 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
                            provider_name=body.provider_name, api_key=api_key)
         return {"bound": True, **info}
 
+    @app.get("/api/bind-status", dependencies=[Depends(auth)])
+    def bind_status(request: Request):
+        # Is the host operator's Hermes currently pointed at the running server?
+        client = request.client.host if request.client else None
+        if client not in _LOOPBACK_HOSTS:
+            return {"bound": False}
+        running = app.state.manager.list()  # records: no health probe (fast)
+        inst = running[0] if running else None
+        cfg_path = Path.home() / ".hermes" / "config.yaml"
+        if inst is None or not cfg_path.exists():
+            return {"bound": False, "model_id": None}
+        base = f"http://127.0.0.1:{inst.port}/v1"
+        try:
+            from ruamel.yaml import YAML
+            data = YAML().load(cfg_path.read_text()) or {}
+        except Exception:
+            return {"bound": False, "model_id": None}
+        model = data.get("model") or {}
+        is_bound = model.get("base_url") == base
+        return {"bound": bool(is_bound),
+                "model_id": model.get("default") if is_bound else None}
+
     SUBPROTO_PREFIX = "lmm.bearer."
 
     @app.websocket("/api/stream")
@@ -224,18 +255,21 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
 
         log_dir = Path(app.state.log_dir)
         offsets: dict[int, int] = {}
-        # initial tail of each running server's log
-        for inst in app.state.manager.status():
+        # status() does blocking /health probes — run it OFF the event loop
+        # (via a thread) so it can't stall every other request for ~seconds.
+        servers_now = await asyncio.to_thread(app.state.manager.status)
+        for inst in servers_now:
             path = log_dir / f"server-{inst.port}.log"
             for line in read_log_tail(path, max_lines=200):
                 await ws.send_json({"type": "log", "port": inst.port, "line": line})
             offsets[inst.port] = path.stat().st_size if path.exists() else 0
         await ws.send_json({"type": "status",
-                            "servers": [_instance_dict(s) for s in app.state.manager.status()]})
+                            "servers": [_instance_dict(s) for s in servers_now]})
         try:
             while True:
                 await asyncio.sleep(1.0)
-                for inst in app.state.manager.status():
+                servers_now = await asyncio.to_thread(app.state.manager.status)
+                for inst in servers_now:
                     path = log_dir / f"server-{inst.port}.log"
                     prev = offsets.get(inst.port, 0)
                     # log truncated/rotated (e.g. on switch) → restart from the top
@@ -245,7 +279,7 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
                     for line in lines:
                         await ws.send_json({"type": "log", "port": inst.port, "line": line})
                 await ws.send_json({"type": "status",
-                                    "servers": [_instance_dict(s) for s in app.state.manager.status()]})
+                                    "servers": [_instance_dict(s) for s in servers_now]})
         except Exception:
             return
 

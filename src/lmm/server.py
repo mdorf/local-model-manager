@@ -13,6 +13,15 @@ from lmm.process import pid_alive, spawn, stop_proc, terminate_pid
 from lmm.state import InstanceRecord, load_instances, mutate_instances, state_dir
 
 
+def _api_key_from_command(command: list[str]) -> str | None:
+    """Pull the value of `--api-key` out of a llama-server command, if present."""
+    if "--api-key" in command:
+        i = command.index("--api-key")
+        if i + 1 < len(command):
+            return command[i + 1]
+    return None
+
+
 @dataclass
 class ServerInstance:
     port: int
@@ -58,8 +67,9 @@ class ServerManager:
         self._upsert(InstanceRecord(port=port, pid=proc.pid,
                                     model_path=model_path, started_at=started_at))
         base = f"http://127.0.0.1:{port}"
+        api_key = _api_key_from_command(command)
         if wait_for_health(base, timeout=ready_timeout):
-            status = "ready" if smoke_test(base) else "unhealthy"
+            status = "ready" if smoke_test(base, api_key=api_key) else "unhealthy"
         else:
             status = "unhealthy"
         return ServerInstance(port=port, pid=proc.pid, model_path=model_path,

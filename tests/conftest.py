@@ -59,6 +59,10 @@ def _isolate_shared_state_dir(monkeypatch, tmp_path):
     """
     import lmm.state as state
     monkeypatch.setattr(state, "SHARED_STATE_DIR", tmp_path / "no-shared-state")
+    # Also pin LMM_STATE_DIR to a per-test tmp so state_dir() never resolves to a
+    # real ~/Library/... dir holding a stray daemon.json (which would make the CLI
+    # think a daemon is running). Resolution tests override/delenv this themselves.
+    monkeypatch.setenv("LMM_STATE_DIR", str(tmp_path / "state"))
 
 
 @pytest.fixture

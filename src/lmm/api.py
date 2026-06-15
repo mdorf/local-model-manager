@@ -2,20 +2,48 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import secrets
 import threading
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from lmm.daemonconfig import DaemonConfig
 from lmm.discovery import discover_models
 from lmm.gguf import read_gguf
 from lmm.hardware import detect_hardware
 from lmm.llama import get_supported_flags
+from lmm.logtail import read_log_tail, tail_new_lines
 from lmm.models import Model
+from lmm.net import is_loopback
 from lmm.recommend import recommend_config
 from lmm.server import ServerInstance, ServerManager
+from lmm.state import state_dir
+
+
+_WEBUI_DIR = Path(__file__).parent / "webui"
+
+
+def _inject_token(html: str, token: str, client_host: str | None) -> str:
+    if client_host in ("127.0.0.1", "::1", "localhost") and token:
+        return html.replace("</head>", f'<script>window.LMM_TOKEN={json.dumps(token)}</script></head>', 1)
+    return html
+
+
+class StartServerRequest(BaseModel):
+    model: str
+    port: int | None = None
+    flags: list[str] | None = None
+
+
+class SwitchServerRequest(BaseModel):
+    model: str
+    port: int | None = None
 
 
 def _model_dict(m: Model) -> dict:
@@ -37,10 +65,14 @@ def _default_command_builder(config: DaemonConfig):
         for m in discover_models(config.roots):
             if m.path.name == model_name or str(m.path) == model_name:
                 metadata = read_gguf(m.shards[0]).metadata
+                # bind the inference server to the daemon's host; enforce an
+                # api-key only when that's LAN-exposed (loopback = local-only,
+                # no key — so llama-server's own UI works without one).
+                lan = not is_loopback(config.host)
                 cfg = recommend_config(m, metadata, detect_hardware(),
                                        supported=get_supported_flags() or None,
-                                       port=port, alias=m.path.stem,
-                                       api_key=config.inference_key)
+                                       host=config.host, port=port, alias=m.path.stem,
+                                       api_key=config.inference_key if lan else None)
                 return ["llama-server", *cfg.flags], str(m.path)
         raise HTTPException(status_code=404, detail="model not found")
     return build
@@ -63,6 +95,7 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
     app.state.manager = manager or ServerManager()
     app.state.command_builder = command_builder or _default_command_builder(config)
     app.state.lock = threading.Lock()
+    app.state.log_dir = state_dir() / "logs"
     auth = _make_auth(config)
 
     @app.get("/api/health")
@@ -99,12 +132,9 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
                         "message": cfg.fit.message}}
 
     @app.post("/api/servers", dependencies=[Depends(auth)])
-    def start_server(body: dict):
-        model = body.get("model")
-        if not model:
-            raise HTTPException(status_code=400, detail="'model' is required")
-        port = int(body.get("port") or 8080)
-        command, model_path = app.state.command_builder(model, port)
+    def start_server(body: StartServerRequest):
+        port = body.port or 8080
+        command, model_path = app.state.command_builder(body.model, port)
         with app.state.lock:
             inst = app.state.manager.start(command, port=port, model_path=model_path)
         return _instance_dict(inst)
@@ -116,14 +146,80 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
         return {"stopped": ok, "port": port}
 
     @app.post("/api/servers/switch", dependencies=[Depends(auth)])
-    def switch_server(body: dict):
-        model = body.get("model")
-        if not model:
-            raise HTTPException(status_code=400, detail="'model' is required")
-        port = int(body.get("port") or 8080)
-        command, model_path = app.state.command_builder(model, port)
+    def switch_server(body: SwitchServerRequest):
+        port = body.port or 8080
+        command, model_path = app.state.command_builder(body.model, port)
         with app.state.lock:
             inst = app.state.manager.switch(command, port=port, model_path=model_path)
         return _instance_dict(inst)
+
+    @app.get("/api/connection-info", dependencies=[Depends(auth)])
+    def connection_info():
+        running = app.state.manager.status()
+        inst = running[0] if running else None
+        if inst is not None:
+            base_url = inst.base_url.rstrip("/") + "/v1"
+            model_id = Path(inst.model_path).stem
+        else:
+            host = config.host if config.host not in ("0.0.0.0", "::") else "127.0.0.1"
+            base_url = f"http://{host}:8080/v1"
+            model_id = None
+        # a loopback (local-only) server runs without --api-key, so report no key
+        lan = not is_loopback(config.host)
+        return {"base_url": base_url,
+                "inference_key": config.inference_key if lan else "",
+                "model_id": model_id}
+
+    SUBPROTO_PREFIX = "lmm.bearer."
+
+    @app.websocket("/api/stream")
+    async def stream(ws: WebSocket):
+        # auth via subprotocol: browsers can't set headers on WS
+        protos = [p.strip() for p in
+                  (ws.headers.get("sec-websocket-protocol") or "").split(",") if p.strip()]
+        token = next((p[len(SUBPROTO_PREFIX):] for p in protos
+                      if p.startswith(SUBPROTO_PREFIX)), None)
+        if config.token and (token is None or
+                             not secrets.compare_digest(token, config.token)):
+            await ws.close(code=1008)
+            return
+        accept_proto = next((p for p in protos if p.startswith(SUBPROTO_PREFIX)), None)
+        await ws.accept(subprotocol=accept_proto)
+
+        log_dir = Path(app.state.log_dir)
+        offsets: dict[int, int] = {}
+        # initial tail of each running server's log
+        for inst in app.state.manager.status():
+            path = log_dir / f"server-{inst.port}.log"
+            for line in read_log_tail(path, max_lines=200):
+                await ws.send_json({"type": "log", "port": inst.port, "line": line})
+            offsets[inst.port] = path.stat().st_size if path.exists() else 0
+        await ws.send_json({"type": "status",
+                            "servers": [_instance_dict(s) for s in app.state.manager.status()]})
+        try:
+            while True:
+                await asyncio.sleep(1.0)
+                for inst in app.state.manager.status():
+                    path = log_dir / f"server-{inst.port}.log"
+                    prev = offsets.get(inst.port, 0)
+                    # log truncated/rotated (e.g. on switch) → restart from the top
+                    if path.exists() and path.stat().st_size < prev:
+                        prev = 0
+                    lines, offsets[inst.port] = tail_new_lines(path, prev)
+                    for line in lines:
+                        await ws.send_json({"type": "log", "port": inst.port, "line": line})
+                await ws.send_json({"type": "status",
+                                    "servers": [_instance_dict(s) for s in app.state.manager.status()]})
+        except Exception:
+            return
+
+    @app.get("/", response_class=HTMLResponse)
+    def index(request: Request):
+        html = (_WEBUI_DIR / "index.html").read_text()
+        host = request.client.host if request.client else None
+        return HTMLResponse(_inject_token(html, config.token, host))
+
+    if _WEBUI_DIR.exists():
+        app.mount("/", StaticFiles(directory=str(_WEBUI_DIR)), name="webui")
 
     return app

@@ -11,7 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from lmm import deploy
+from lmm import daemon_client, deploy
 from lmm.daemonconfig import load_or_create_config
 from lmm.discovery import discover_models
 from lmm.gguf import read_gguf
@@ -63,16 +63,26 @@ def _find_model(root, name):
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
+    d = daemon_client.daemon_available()
+    if d:
+        try:
+            out = daemon_client.start(d["base"], d["token"], args.model, args.port) or {}
+        except daemon_client.DaemonError as e:
+            print(e)
+            return 1
+        print(f"Status: {out.get('status')}  (port {out.get('port')})")
+        return 0 if out.get("status") == "ready" else 1
+    # ---- existing direct-mode code unchanged below ----
     model = _find_model(args.root, args.model)
     if model is None:
         print(f"Model not found: {args.model}")
         return 1
     metadata = read_gguf(model.shards[0]).metadata
-    inf_key = load_or_create_config().inference_key
+    # dev `serve` is loopback / current-user — no --api-key (host defaults to
+    # 127.0.0.1, so llama-server stays open locally like a hand-run server).
     cfg = recommend_config(model, metadata, detect_hardware(),
                            supported=get_supported_flags() or None,
-                           port=args.port, alias=model.path.stem,
-                           api_key=inf_key)
+                           port=args.port, alias=model.path.stem)
     for w in cfg.warnings:
         print(f"warning: {w}")
     if cfg.fit.level == "wont_load":
@@ -87,6 +97,17 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def cmd_stop(args: argparse.Namespace) -> int:
+    d = daemon_client.daemon_available()
+    if d:
+        try:
+            out = daemon_client.stop(d["base"], d["token"], args.port)
+        except daemon_client.DaemonError as e:
+            print(e)
+            return 1
+        print(f"Stopped server on port {args.port}." if out and out.get("stopped")
+              else f"No server on port {args.port}.")
+        return 0
+    # ---- existing direct-mode code unchanged ----
     mgr = ServerManager()
     if not any(r.port == args.port for r in mgr.list()):
         print(f"No server managed on port {args.port}.")
@@ -98,6 +119,21 @@ def cmd_stop(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
+    d = daemon_client.daemon_available()
+    if d:
+        try:
+            servers = (daemon_client.status(d["base"], d["token"]) or {}).get("servers", [])
+        except daemon_client.DaemonError as e:
+            print(e)
+            return 1
+        if not servers:
+            print("No running servers.")
+            return 0
+        for s in servers:
+            tag = " (external)" if s.get("external") else ""
+            print(f"port {s['port']}: {s['status']}{tag}  pid={s.get('pid')}  {s.get('model')}")
+        return 0
+    # ---- existing direct-mode code unchanged ----
     instances = ServerManager().status()
     if not instances:
         print("No running servers.")
@@ -109,15 +145,25 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_switch(args: argparse.Namespace) -> int:
+    d = daemon_client.daemon_available()
+    if d:
+        try:
+            out = daemon_client.switch(d["base"], d["token"], args.model, args.port) or {}
+        except daemon_client.DaemonError as e:
+            print(e)
+            return 1
+        print(f"Status: {out.get('status')}  (port {out.get('port')})")
+        return 0 if out.get("status") == "ready" else 1
+    # ---- existing direct-mode code unchanged ----
     model = _find_model(args.root, args.model)
     if model is None:
         print(f"Model not found: {args.model}")
         return 1
     metadata = read_gguf(model.shards[0]).metadata
+    # dev `switch` is loopback / current-user — no --api-key (see cmd_serve)
     cfg = recommend_config(model, metadata, detect_hardware(),
                            supported=get_supported_flags() or None,
-                           port=args.port, alias=model.path.stem,
-                           api_key=load_or_create_config().inference_key)
+                           port=args.port, alias=model.path.stem)
     for w in cfg.warnings:
         print(f"warning: {w}")
     mgr = ServerManager()

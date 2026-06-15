@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 import threading
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket
 from pydantic import BaseModel
 
 from lmm.daemonconfig import DaemonConfig
@@ -14,9 +15,11 @@ from lmm.discovery import discover_models
 from lmm.gguf import read_gguf
 from lmm.hardware import detect_hardware
 from lmm.llama import get_supported_flags
+from lmm.logtail import read_log_tail, tail_new_lines
 from lmm.models import Model
 from lmm.recommend import recommend_config
 from lmm.server import ServerInstance, ServerManager
+from lmm.state import state_dir
 
 
 class StartServerRequest(BaseModel):
@@ -75,6 +78,7 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
     app.state.manager = manager or ServerManager()
     app.state.command_builder = command_builder or _default_command_builder(config)
     app.state.lock = threading.Lock()
+    app.state.log_dir = state_dir() / "logs"
     auth = _make_auth(config)
 
     @app.get("/api/health")
@@ -144,5 +148,44 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
             model_id = None
         return {"base_url": base_url, "inference_key": config.inference_key,
                 "model_id": model_id}
+
+    SUBPROTO_PREFIX = "lmm.bearer."
+
+    @app.websocket("/api/stream")
+    async def stream(ws: WebSocket):
+        # auth via subprotocol: browsers can't set headers on WS
+        protos = [p.strip() for p in
+                  (ws.headers.get("sec-websocket-protocol") or "").split(",") if p.strip()]
+        token = next((p[len(SUBPROTO_PREFIX):] for p in protos
+                      if p.startswith(SUBPROTO_PREFIX)), None)
+        if config.token and (token is None or
+                             not secrets.compare_digest(token, config.token)):
+            await ws.close(code=1008)
+            return
+        accept_proto = next((p for p in protos if p.startswith(SUBPROTO_PREFIX)), None)
+        await ws.accept(subprotocol=accept_proto)
+
+        log_dir = Path(app.state.log_dir)
+        offsets: dict[int, int] = {}
+        # initial tail of each running server's log
+        for inst in app.state.manager.status():
+            path = log_dir / f"server-{inst.port}.log"
+            for line in read_log_tail(path, max_lines=200):
+                await ws.send_json({"type": "log", "port": inst.port, "line": line})
+            offsets[inst.port] = path.stat().st_size if path.exists() else 0
+        await ws.send_json({"type": "status",
+                            "servers": [_instance_dict(s) for s in app.state.manager.status()]})
+        try:
+            while True:
+                await asyncio.sleep(1.0)
+                for inst in app.state.manager.status():
+                    path = log_dir / f"server-{inst.port}.log"
+                    lines, offsets[inst.port] = tail_new_lines(path, offsets.get(inst.port, 0))
+                    for line in lines:
+                        await ws.send_json({"type": "log", "port": inst.port, "line": line})
+                await ws.send_json({"type": "status",
+                                    "servers": [_instance_dict(s) for s in app.state.manager.status()]})
+        except Exception:
+            return
 
     return app

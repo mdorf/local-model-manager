@@ -342,3 +342,15 @@ html, body {
   100% { transform: translateX(400%); }
 }
 .busy .actions button, .busy #btn-stop { opacity: .5; pointer-events: none; }
+
+/* "Connect an agent" modal */
+.modal-intro { font-size: 13px; color: var(--fg-muted); margin: 0 0 14px; line-height: 1.5; }
+.connect-section {
+  border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px;
+}
+.connect-section h4 { margin: 0 0 4px; font-size: 13px; color: var(--fg-head); }
+.modal-sub { font-size: 12px; color: var(--fg-muted); margin: 0 0 8px; line-height: 1.5; }
+code.block {
+  display: block; padding: 8px 10px; background: var(--bg-code); border-radius: 6px;
+  font-family: monospace; font-size: 12px; word-break: break-all; margin-bottom: 8px;
+}

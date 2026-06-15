@@ -54,6 +54,7 @@ function renderTopbar() {
     statusHtml = `
       <span class="status-label">running:</span>
       <span class="status-value">${esc(running.model)} :${running.port}</span>
+      <button class="btn" id="btn-connect" style="padding:4px 10px;font-size:12px">Connect an agent…</button>
       <button class="btn danger" id="btn-stop" style="padding:4px 10px;font-size:12px">Stop</button>`;
   } else {
     statusHtml = `<span class="status-label">no server running</span>`;
@@ -119,7 +120,6 @@ function renderDetail() {
     ${flagsText ? `<div class="detail-row"><span class="lbl">Flags</span></div><pre class="flags">${esc(flagsText)}</pre>` : ""}
     <div class="actions">
       <button id="btn-start" class="${startClass}">${startLabel}</button>
-      <button id="btn-bind" class="btn ghost">Bind…</button>
     </div>
   </div>`;
 }
@@ -160,12 +160,12 @@ function wireEvents() {
   // Stop button in topbar
   const stopBtn = root.querySelector("#btn-stop");
   if (stopBtn) stopBtn.onclick = doStop;
+  // Connect-an-agent button (topbar, only when a server is running)
+  const connectBtn = root.querySelector("#btn-connect");
+  if (connectBtn) connectBtn.onclick = showConnect;
   // Start/Switch button
   const startBtn = root.querySelector("#btn-start");
   if (startBtn) startBtn.onclick = doStart;
-  // Bind button
-  const bindBtn = root.querySelector("#btn-bind");
-  if (bindBtn) bindBtn.onclick = showBind;
 }
 
 // ── Model selection ───────────────────────────────────────────────────
@@ -248,8 +248,13 @@ function clearBusy() {
   if (bar) bar.remove();
 }
 
-// ── Bind modal ────────────────────────────────────────────────────────
-async function showBind() {
+// ── "Connect an agent" modal ──────────────────────────────────────────
+// Connects an agent/app to the RUNNING model. The daemon can't write a user's
+// config (it runs as _lmm), so we hand over the command (Hermes) and the raw
+// settings (any OpenAI-compatible app) to use locally.
+async function showConnect() {
+  const running = servers[0];
+  if (!running) return;  // button only appears while a server is running
   let info;
   try {
     info = await api.connectionInfo();
@@ -258,41 +263,41 @@ async function showBind() {
     return;
   }
 
-  // Bind to what's actually running (its filename's stem is the served id),
-  // falling back to the selected model when nothing is running yet.
-  const running = servers[0];
-  const port = running ? running.port : 8080;
-  const modelArg = running ? running.model : (selected ? selected.model : "<model>");
-  const bindCmd = `lmm bind ${modelArg} --port ${port}`;
-  const keyId = "bind-key-input";
+  const modelId = info.model_id || running.model;
+  const bindCmd = `lmm bind ${running.model} --port ${running.port}`;
+  const keyId = "conn-key-input";
 
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   overlay.innerHTML = `
     <div class="modal">
-      <h3>Connection info</h3>
-      <div class="field">
-        <label>Base URL (OpenAI-compatible)</label>
-        <code id="bind-url">${esc(info.base_url || "—")}</code>
+      <h3>Connect an agent to this model</h3>
+      <p class="modal-intro">Point an AI agent or any OpenAI-compatible app at
+        <code>${esc(modelId)}</code>, running on this host. Choose your path:</p>
+
+      <div class="connect-section">
+        <h4>Using Hermes</h4>
+        <p class="modal-sub">Run this once on the machine with Hermes — it updates your
+          <code>~/.hermes/config.yaml</code> to use this model:</p>
+        <code class="block" id="conn-cmd">${esc(bindCmd)}</code>
+        <button class="btn ghost" id="btn-copy-cmd">Copy command</button>
       </div>
-      <div class="field">
-        <label>Model id (the <code>model</code> field)</label>
-        <code id="bind-model">${esc(info.model_id || "—")}</code>
-      </div>
-      <div class="field">
-        <label>Inference key</label>
-        <div style="display:flex;gap:6px;align-items:center">
-          <input id="${keyId}" type="password" value="${esc(info.inference_key || "")}" readonly style="flex:1"/>
-          <button class="btn ghost" id="btn-reveal" style="padding:5px 10px;font-size:12px">Reveal</button>
-          <button class="btn ghost" id="btn-copy-key" style="padding:5px 10px;font-size:12px">Copy</button>
+
+      <div class="connect-section">
+        <h4>Any OpenAI-compatible app</h4>
+        <p class="modal-sub">Enter these in the app's API settings:</p>
+        <div class="field"><label>Base URL</label><code>${esc(info.base_url || "—")}</code></div>
+        <div class="field"><label>Model</label><code>${esc(modelId)}</code></div>
+        <div class="field"><label>API key</label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input id="${keyId}" type="password" value="${esc(info.inference_key || "")}" readonly style="flex:1"/>
+            <button class="btn ghost" id="btn-reveal" style="padding:5px 10px;font-size:12px">Reveal</button>
+            <button class="btn ghost" id="btn-copy-key" style="padding:5px 10px;font-size:12px">Copy</button>
+          </div>
         </div>
       </div>
-      <div class="field">
-        <label>CLI bind command</label>
-        <code id="bind-cmd">${esc(bindCmd)}</code>
-      </div>
+
       <div class="modal-actions">
-        <button class="btn ghost" id="btn-copy-cmd">Copy command</button>
         <button class="btn" id="btn-close-modal">Close</button>
       </div>
     </div>`;
@@ -345,9 +350,11 @@ function onStream(msg) {
     const sideEl = root.querySelector(".side");
     if (topbarEl) topbarEl.outerHTML = renderTopbar();
     if (sideEl) sideEl.outerHTML = renderSidebar();
-    // Rewire events for topbar stop button
+    // Rewire events for the rebuilt topbar + sidebar
     const stopBtn = root.querySelector("#btn-stop");
     if (stopBtn) stopBtn.onclick = doStop;
+    const connectBtn = root.querySelector("#btn-connect");
+    if (connectBtn) connectBtn.onclick = showConnect;
     root.querySelectorAll(".item[data-name]").forEach((el) => {
       el.onclick = () => selectModel(el.dataset.name);
     });

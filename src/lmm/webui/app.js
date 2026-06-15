@@ -272,6 +272,16 @@ async function showConnect() {
   const modelId = info.model_id || running.model;
   const bindCmd = `lmm bind ${running.model} --port ${running.port}`;
   const keyId = "conn-key-input";
+  const hasKey = !!info.inference_key;
+  const keyFieldHtml = hasKey
+    ? `<div class="field"><label>API key</label>
+         <div style="display:flex;gap:6px;align-items:center">
+           <input id="${keyId}" type="password" value="${esc(info.inference_key)}" readonly style="flex:1"/>
+           <button class="btn ghost" id="btn-reveal" style="padding:5px 10px;font-size:12px">Reveal</button>
+           <button class="btn ghost" id="btn-copy-key" style="padding:5px 10px;font-size:12px">Copy</button>
+         </div>
+       </div>`
+    : `<div class="field"><label>API key</label><code>none required (local server)</code></div>`;
 
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
@@ -294,13 +304,7 @@ async function showConnect() {
         <p class="modal-sub">Enter these in the app's API settings:</p>
         <div class="field"><label>Base URL</label><code>${esc(info.base_url || "—")}</code></div>
         <div class="field"><label>Model</label><code>${esc(modelId)}</code></div>
-        <div class="field"><label>API key</label>
-          <div style="display:flex;gap:6px;align-items:center">
-            <input id="${keyId}" type="password" value="${esc(info.inference_key || "")}" readonly style="flex:1"/>
-            <button class="btn ghost" id="btn-reveal" style="padding:5px 10px;font-size:12px">Reveal</button>
-            <button class="btn ghost" id="btn-copy-key" style="padding:5px 10px;font-size:12px">Copy</button>
-          </div>
-        </div>
+        ${keyFieldHtml}
       </div>
 
       <div class="modal-actions">
@@ -313,17 +317,18 @@ async function showConnect() {
   overlay.querySelector("#btn-close-modal").onclick = () => overlay.remove();
   overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
 
-  overlay.querySelector("#btn-reveal").onclick = () => {
-    const inp = overlay.querySelector(`#${keyId}`);
-    inp.type = inp.type === "password" ? "text" : "password";
-    overlay.querySelector("#btn-reveal").textContent = inp.type === "password" ? "Reveal" : "Hide";
-  };
-
-  overlay.querySelector("#btn-copy-key").onclick = () => {
-    navigator.clipboard.writeText(info.inference_key || "").catch(() => {});
-    overlay.querySelector("#btn-copy-key").textContent = "Copied!";
-    setTimeout(() => { overlay.querySelector("#btn-copy-key").textContent = "Copy"; }, 1500);
-  };
+  if (hasKey) {
+    overlay.querySelector("#btn-reveal").onclick = () => {
+      const inp = overlay.querySelector(`#${keyId}`);
+      inp.type = inp.type === "password" ? "text" : "password";
+      overlay.querySelector("#btn-reveal").textContent = inp.type === "password" ? "Reveal" : "Hide";
+    };
+    overlay.querySelector("#btn-copy-key").onclick = () => {
+      navigator.clipboard.writeText(info.inference_key || "").catch(() => {});
+      overlay.querySelector("#btn-copy-key").textContent = "Copied!";
+      setTimeout(() => { overlay.querySelector("#btn-copy-key").textContent = "Copy"; }, 1500);
+    };
+  }
 
   overlay.querySelector("#btn-copy-cmd").onclick = () => {
     navigator.clipboard.writeText(bindCmd).catch(() => {});

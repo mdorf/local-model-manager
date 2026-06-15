@@ -20,6 +20,7 @@ from lmm.hardware import detect_hardware
 from lmm.llama import get_supported_flags
 from lmm.logtail import read_log_tail, tail_new_lines
 from lmm.models import Model
+from lmm.net import is_loopback
 from lmm.recommend import recommend_config
 from lmm.server import ServerInstance, ServerManager
 from lmm.state import state_dir
@@ -64,10 +65,14 @@ def _default_command_builder(config: DaemonConfig):
         for m in discover_models(config.roots):
             if m.path.name == model_name or str(m.path) == model_name:
                 metadata = read_gguf(m.shards[0]).metadata
+                # bind the inference server to the daemon's host; enforce an
+                # api-key only when that's LAN-exposed (loopback = local-only,
+                # no key — so llama-server's own UI works without one).
+                lan = not is_loopback(config.host)
                 cfg = recommend_config(m, metadata, detect_hardware(),
                                        supported=get_supported_flags() or None,
-                                       port=port, alias=m.path.stem,
-                                       api_key=config.inference_key)
+                                       host=config.host, port=port, alias=m.path.stem,
+                                       api_key=config.inference_key if lan else None)
                 return ["llama-server", *cfg.flags], str(m.path)
         raise HTTPException(status_code=404, detail="model not found")
     return build
@@ -159,7 +164,10 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
             host = config.host if config.host not in ("0.0.0.0", "::") else "127.0.0.1"
             base_url = f"http://{host}:8080/v1"
             model_id = None
-        return {"base_url": base_url, "inference_key": config.inference_key,
+        # a loopback (local-only) server runs without --api-key, so report no key
+        lan = not is_loopback(config.host)
+        return {"base_url": base_url,
+                "inference_key": config.inference_key if lan else "",
                 "model_id": model_id}
 
     SUBPROTO_PREFIX = "lmm.bearer."

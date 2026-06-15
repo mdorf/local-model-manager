@@ -30,8 +30,9 @@ class FakeManager:
 def test_connection_info_with_running_server():
     inst = ServerInstance(port=8080, pid=1, model_path="/models/Qwen3.6-27B-Q8_0.gguf",
                           started_at=0.0, status="ready", external=False)
-    # base_url is a computed @property (http://127.0.0.1:<port>) -> connection-info adds /v1
-    cfg = DaemonConfig(token="t", inference_key="sekret", roots=["/x"])
+    # base_url is a computed @property (http://127.0.0.1:<port>) -> connection-info adds /v1.
+    # host=0.0.0.0 (LAN) so the key is reported (loopback would omit it).
+    cfg = DaemonConfig(host="0.0.0.0", token="t", inference_key="sekret", roots=["/x"])
     app = create_app(cfg, manager=FakeManager([inst]), command_builder=lambda *a: None)
     r = TestClient(app).get("/api/connection-info", headers={"Authorization": "Bearer t"})
     assert r.status_code == 200
@@ -39,6 +40,22 @@ def test_connection_info_with_running_server():
     assert body["base_url"].endswith("/v1")
     assert body["inference_key"] == "sekret"
     assert body["model_id"] == "Qwen3.6-27B-Q8_0"
+
+
+def test_connection_info_omits_key_on_loopback():
+    cfg = DaemonConfig(host="127.0.0.1", token="t", inference_key="sekret", roots=["/x"])
+    app = create_app(cfg, manager=FakeManager(), command_builder=lambda *a: None)
+    body = TestClient(app).get("/api/connection-info",
+                               headers={"Authorization": "Bearer t"}).json()
+    assert body["inference_key"] == ""  # loopback server runs without --api-key
+
+
+def test_connection_info_includes_key_on_lan():
+    cfg = DaemonConfig(host="0.0.0.0", token="t", inference_key="sekret", roots=["/x"])
+    app = create_app(cfg, manager=FakeManager(), command_builder=lambda *a: None)
+    body = TestClient(app).get("/api/connection-info",
+                               headers={"Authorization": "Bearer t"}).json()
+    assert body["inference_key"] == "sekret"
 
 
 def test_connection_info_requires_token():

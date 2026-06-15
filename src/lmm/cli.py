@@ -78,11 +78,11 @@ def cmd_serve(args: argparse.Namespace) -> int:
         print(f"Model not found: {args.model}")
         return 1
     metadata = read_gguf(model.shards[0]).metadata
-    inf_key = load_or_create_config().inference_key
+    # dev `serve` is loopback / current-user — no --api-key (host defaults to
+    # 127.0.0.1, so llama-server stays open locally like a hand-run server).
     cfg = recommend_config(model, metadata, detect_hardware(),
                            supported=get_supported_flags() or None,
-                           port=args.port, alias=model.path.stem,
-                           api_key=inf_key)
+                           port=args.port, alias=model.path.stem)
     for w in cfg.warnings:
         print(f"warning: {w}")
     if cfg.fit.level == "wont_load":
@@ -160,10 +160,10 @@ def cmd_switch(args: argparse.Namespace) -> int:
         print(f"Model not found: {args.model}")
         return 1
     metadata = read_gguf(model.shards[0]).metadata
+    # dev `switch` is loopback / current-user — no --api-key (see cmd_serve)
     cfg = recommend_config(model, metadata, detect_hardware(),
                            supported=get_supported_flags() or None,
-                           port=args.port, alias=model.path.stem,
-                           api_key=load_or_create_config().inference_key)
+                           port=args.port, alias=model.path.stem)
     for w in cfg.warnings:
         print(f"warning: {w}")
     mgr = ServerManager()

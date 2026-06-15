@@ -50,6 +50,14 @@ def test_stream_sends_initial_log_tail_and_status(tmp_path):
     assert "hello-from-llama" in log_lines
 
 
+def test_websocket_library_available():
+    # Regression: plain `uvicorn` ships no WS implementation, so /api/stream 404s
+    # at runtime (TestClient masks this). A WS library must be a hard dependency.
+    import importlib.util
+    assert (importlib.util.find_spec("websockets") is not None
+            or importlib.util.find_spec("wsproto") is not None)
+
+
 def test_stream_rejects_bad_token(tmp_path):
     app = _app(tmp_path)
     client = TestClient(app)

@@ -331,7 +331,14 @@ async function showConnect() {
   }
 
   const modelId = info.model_id || running.model;
-  const bindCmd = `lmm bind ${running.model} --port ${running.port}`;
+  // Build the remote-bind command + Base URL from the host the browser actually
+  // used to reach the daemon (location.hostname) — NOT 127.0.0.1, which is wrong
+  // when this command is run on "another machine". When the server is LAN-exposed
+  // it requires the inference key, so include it so the command works as-is.
+  const host = location.hostname;
+  const baseUrl = `http://${host}:${running.port}/v1`;
+  const keyArg = info.inference_key ? ` --api-key ${info.inference_key}` : "";
+  const bindCmd = `lmm bind ${running.model} --host ${host} --port ${running.port}${keyArg}`;
   // Hermes already points at this running model (#2) → re-binding is a no-op,
   // so show it as done and disabled rather than an active button.
   const alreadyBound = !!bound.bound;
@@ -372,7 +379,7 @@ async function showConnect() {
       <div class="connect-section">
         <h4>Any OpenAI-compatible app</h4>
         <p class="modal-sub">Enter these in the app's API settings:</p>
-        <div class="field"><label>Base URL</label><code>${esc(info.base_url || "—")}</code></div>
+        <div class="field"><label>Base URL</label><code>${esc(baseUrl)}</code></div>
         <div class="field"><label>Model</label><code>${esc(modelId)}</code></div>
         ${keyFieldHtml}
       </div>

@@ -217,3 +217,18 @@ def test_switch_terminates_adopted_then_starts(mgr, monkeypatch):
         assert all(r.port != 48091 for r in mgr.list())   # its record is gone
     finally:
         mgr.stop(p)
+
+
+def test_stop_resolves_pid_from_port_when_record_pidless(mgr, monkeypatch):
+    # A pid-less record (e.g. adopted before lsof worked) must still be killable:
+    # stop() resolves the live listener's pid from the port and terminates it.
+    import lmm.server as s
+    killed = []
+    monkeypatch.setattr(s, "is_healthy", lambda base, **k: True)
+    monkeypatch.setattr(s, "listening_pid", lambda port: None)   # adopt can't find a pid
+    monkeypatch.setattr(s, "terminate_pid", lambda pid, timeout=10.0: killed.append(pid) or True)
+    inst = mgr.adopt(48092, model_path="/m/x.gguf")
+    assert inst.pid == -1                                        # recorded pid-less
+    monkeypatch.setattr(s, "listening_pid", lambda port: 7777)   # but it IS listening now
+    assert mgr.stop(48092) is True
+    assert killed == [7777]                                     # resolved + killed by port

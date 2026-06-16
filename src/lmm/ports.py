@@ -10,10 +10,11 @@ def listening_pid(port: int) -> int | None:
     """PID of the process listening on `port` (via lsof), or None if none/unknown.
 
     Lets the daemon adopt an externally-started server with a real pid so an
-    explicit stop/switch can terminate it. Absolute path first: lsof lives in
-    /usr/bin, which is on a launchd daemon's PATH, but be defensive.
+    explicit stop/switch can terminate it. Try absolute paths first — lsof is in
+    /usr/sbin on macOS (NOT /usr/bin), which a launchd daemon's minimal PATH may
+    not include — then fall back to PATH lookup.
     """
-    for exe in ("/usr/bin/lsof", "lsof"):
+    for exe in ("/usr/sbin/lsof", "/usr/bin/lsof", "lsof"):
         try:
             out = subprocess.run([exe, "-ti", f"tcp:{port}", "-sTCP:LISTEN"],
                                  capture_output=True, text=True, timeout=5)

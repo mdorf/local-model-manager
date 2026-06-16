@@ -82,11 +82,14 @@ class ServerManager:
         proc = self._procs.get(port)
         if proc is not None:
             ok = stop_proc(proc, timeout=timeout)
-        elif rec is not None and rec.pid > 0:
-            # Cross-process or adopted server we have a real pid for — an
-            # explicit stop/switch terminates it (adopt captures the pid). A
-            # pid-less record (-1) is just forgotten; we can't kill what we can't find.
-            ok = terminate_pid(rec.pid, timeout=timeout)
+        else:
+            # No Popen handle (adopted, or a record from a prior daemon). Terminate
+            # by pid: the recorded one, or — if that's unknown (-1) — whatever is
+            # actually listening on the port. An explicit stop/switch is intent to
+            # free the port, so we resolve and kill the real process.
+            pid = rec.pid if (rec is not None and rec.pid > 0) else listening_pid(port)
+            if pid and pid > 0:
+                ok = terminate_pid(pid, timeout=timeout)
         self.forget(port)
         return ok
 

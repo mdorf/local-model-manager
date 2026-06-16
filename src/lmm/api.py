@@ -69,10 +69,16 @@ def _instance_dict(inst: ServerInstance) -> dict:
             "started_at": inst.started_at}
 
 
+def _model_matches(m, name: str) -> bool:
+    # Accept the full filename, the full path, or the bare stem (which is the
+    # served --alias, e.g. `Qwen3.6-27B-Q8_0` for `Qwen3.6-27B-Q8_0.gguf`).
+    return name in (m.path.name, str(m.path), m.path.stem)
+
+
 def _default_command_builder(config: DaemonConfig):
     def build(model_name: str, port: int):
         for m in discover_models(config.roots):
-            if m.path.name == model_name or str(m.path) == model_name:
+            if _model_matches(m, model_name):
                 metadata = read_gguf(m.shards[0]).metadata
                 # bind the inference server to the daemon's host; enforce an
                 # api-key only when that's LAN-exposed (loopback = local-only,
@@ -126,7 +132,7 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
 
     def _find(name: str):
         for m in discover_models(config.roots):
-            if m.path.name == name or str(m.path) == name:
+            if _model_matches(m, name):
                 return m
         return None
 

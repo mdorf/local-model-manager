@@ -55,3 +55,17 @@ def test_switch_defaults_port_8080():
     r = _client().post("/api/servers/switch", json={"model": "m.gguf"}, headers=H)
     assert r.status_code == 200
     assert r.json()["port"] == 8080
+
+
+def test_model_matches_accepts_filename_path_and_stem():
+    # Regression: the daemon must resolve a model by its bare stem (the served
+    # --alias), not only the full filename — `lmm serve Qwen3.6-27B-Q8_0` 404'd.
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from lmm.api import _model_matches
+    m = SimpleNamespace(path=Path("/Users/Shared/models/Qwen3.6-27B-Q8_0.gguf"))
+    assert _model_matches(m, "Qwen3.6-27B-Q8_0.gguf")              # filename
+    assert _model_matches(m, "/Users/Shared/models/Qwen3.6-27B-Q8_0.gguf")  # full path
+    assert _model_matches(m, "Qwen3.6-27B-Q8_0")                  # stem (the fix)
+    assert not _model_matches(m, "Qwen3.6-27B-NEO")               # non-match

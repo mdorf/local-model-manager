@@ -61,6 +61,7 @@ def test_classify_extracts_license_quantizer_chat_template_and_card():
             "general.architecture": "qwen35",
             "general.license": "apache-2.0",
             "general.quantized_by": "Unsloth",
+            "general.author": "HauhauCS",
             "general.base_model.0.repo_url": "https://huggingface.co/Qwen/Qwen3.6-27B",
             "tokenizer.chat_template": "{{ template }}",
         },
@@ -69,6 +70,7 @@ def test_classify_extracts_license_quantizer_chat_template_and_card():
     m = classify(info, "/tmp/x.gguf")
     assert m.license == "apache-2.0"
     assert m.quantized_by == "Unsloth"
+    assert m.author == "HauhauCS"
     assert m.has_chat_template is True
     assert m.hf_base_repo == "https://huggingface.co/Qwen/Qwen3.6-27B"  # base_model fallback
 

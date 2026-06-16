@@ -154,13 +154,16 @@ function renderDetail() {
   const meta = models.find((x) => x.name === rec.model) || {};
   const row = (label, html) => html ? `<div class="detail-row"><span class="lbl">${label}</span><span>${html}</span></div>` : "";
   const quant = meta.quant ? esc(meta.quant) + (meta.quantized_by ? ` (by ${esc(meta.quantized_by)})` : "") : "";
+  // Direct card link when the GGUF embeds the repo; otherwise a reliable HF
+  // search for the model name (never a fabricated/guessed direct URL).
   const card = meta.hf_base_repo
     ? `<a href="${esc(meta.hf_base_repo)}" target="_blank" rel="noopener">${esc(meta.hf_base_repo.replace("https://huggingface.co/", ""))} ↗</a>`
-    : "";
+    : `<a href="https://huggingface.co/models?search=${encodeURIComponent(meta.display_name || rec.model)}" target="_blank" rel="noopener">search Hugging Face ↗</a>`;
   const metaHtml =
     row("Architecture", esc(meta.arch || "")) +
     row("Parameters", esc(meta.size_label || "")) +
     row("Quantization", quant) +
+    row("Author", esc(meta.author || "")) +
     row("Max context", meta.context_length ? meta.context_length.toLocaleString() + " tokens" : "") +
     (meta.has_mtp ? row("Speculative", "draft-mtp (built-in draft head)") : "") +
     (meta.has_chat_template ? row("Chat template", "embedded") : "") +

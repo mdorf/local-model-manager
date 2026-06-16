@@ -40,6 +40,7 @@ class Model:
     license: str | None = None
     quantized_by: str | None = None
     has_chat_template: bool = False
+    author: str | None = None
 
 
 def _derive_family(basename: str, size_label: str) -> str:
@@ -89,4 +90,5 @@ def classify(info: GGUFInfo, path: str | Path, *,
         license=(str(md["general.license"]) if md.get("general.license") else None),
         quantized_by=(str(md["general.quantized_by"]) if md.get("general.quantized_by") else None),
         has_chat_template=bool(md.get("tokenizer.chat_template")),
+        author=(str(md["general.author"]) if md.get("general.author") else None),
     )

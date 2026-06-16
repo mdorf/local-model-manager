@@ -7,11 +7,25 @@ from lmm.deploy import (
     launchd_plist,
     plist_install_path,
     plist_steps,
+    service_restart_steps,
+    service_start_steps,
+    service_stop_steps,
     shared_setup_steps,
     shared_venv_exec,
     shared_venv_steps,
     uninstall_steps,
 )
+
+
+def test_service_step_generators():
+    plist = plist_install_path()
+    assert service_stop_steps() == [f"launchctl bootout system {plist}"]
+    assert service_start_steps() == [f"launchctl bootstrap system {plist}"]
+    # restart = stop then start, in that order
+    assert service_restart_steps() == [
+        f"launchctl bootout system {plist}",
+        f"launchctl bootstrap system {plist}",
+    ]
 
 
 def test_plist_steps_chowns_log_dir_recursively():

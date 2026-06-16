@@ -116,6 +116,20 @@ def uninstall_steps(*, shared_dir: str | None = None) -> list[str]:
     return steps
 
 
+def service_stop_steps() -> list[str]:
+    """Stop the running daemon without uninstalling (plist stays → reloads at boot)."""
+    return [f"launchctl bootout system {_PLIST_PATH}"]
+
+
+def service_start_steps() -> list[str]:
+    """(Re)load the installed daemon from its plist."""
+    return [f"launchctl bootstrap system {_PLIST_PATH}"]
+
+
+def service_restart_steps() -> list[str]:
+    return [*service_stop_steps(), *service_start_steps()]
+
+
 def existing_install_artifacts(*, shared_dir: str) -> list[str]:
     """Read-only: which install artifacts already exist (for the re-run guard)."""
     found: list[str] = []

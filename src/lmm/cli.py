@@ -321,6 +321,68 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
     return 0
 
 
+def _probe_health(host: str, port: int) -> bool:
+    """Is the control daemon answering on /api/health? (open endpoint, no token)."""
+    import urllib.error
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://{host}:{port}/api/health", timeout=3) as r:
+            return json.loads(r.read() or "{}").get("status") == "ok"
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+
+
+def _service_status() -> int:
+    if not Path(deploy.plist_install_path()).exists():
+        print(f"{deploy.LABEL}: not installed (no LaunchDaemon).")
+        print("Run it in the foreground with `uv run lmm daemon`, or install the "
+              "always-on service with `sudo lmm install`.")
+        return 0
+    # The installer records host/port in the shared daemon.json (world-readable).
+    host, port = "127.0.0.1", 8770
+    dj = Path(SHARED_DIR) / "daemon.json"
+    if dj.exists():
+        try:
+            cfg = json.loads(dj.read_text())
+            host, port = cfg.get("host") or host, int(cfg.get("port") or port)
+        except (ValueError, OSError):
+            pass
+    probe_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+    running = _probe_health(probe_host, port)
+    print(f"{deploy.LABEL}: installed ({deploy.plist_install_path()})")
+    print(f"  control daemon: {'running' if running else 'NOT responding'} "
+          f"(http://{probe_host}:{port})")
+    if not running:
+        print("  start it with: sudo lmm service start")
+    return 0
+
+
+def cmd_service(args: argparse.Namespace) -> int:
+    if args.action == "status":
+        return _service_status()  # read-only, no privileges
+    steps = {
+        "stop": deploy.service_stop_steps(),
+        "start": deploy.service_start_steps(),
+        "restart": deploy.service_restart_steps(),
+    }[args.action]
+    if args.dry_run:
+        print("# would run (as root):")
+        for s in steps:
+            print(f"  {s}")
+        return 0
+    if os.geteuid() != 0:
+        print(f"`lmm service {args.action}` must run as root — re-run: "
+              f"sudo lmm service {args.action} (or preview with --dry-run)")
+        return 1
+    if not Path(deploy.plist_install_path()).exists():
+        print(f"{deploy.LABEL} is not installed — run `sudo lmm install` first.")
+        return 1
+    for s in steps:
+        subprocess.run(s, shell=True, check=False)
+    print(f"Service {args.action}: done for {deploy.LABEL}.")
+    return 0
+
+
 def cmd_daemon(args: argparse.Namespace) -> int:
     import uvicorn
 
@@ -408,6 +470,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_uninstall = sub.add_parser("uninstall", help="remove the daemon system service (sudo)")
     p_uninstall.add_argument("--dry-run", action="store_true")
     p_uninstall.set_defaults(func=cmd_uninstall)
+
+    p_service = sub.add_parser(
+        "service", help="control the installed daemon: status / stop / start / restart")
+    p_service.add_argument("action", choices=["status", "stop", "start", "restart"],
+                           help="status is read-only; stop/start/restart need sudo")
+    p_service.add_argument("--dry-run", action="store_true",
+                           help="print the privileged steps without running them")
+    p_service.set_defaults(func=cmd_service)
 
     return parser
 

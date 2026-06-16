@@ -233,7 +233,12 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
         except Exception:
             return {"bound": False, "model_id": None}
         model = data.get("model") or {}
-        is_bound = model.get("base_url") == base
+        # "Bound" means Hermes points at the model that is running RIGHT NOW —
+        # match both the URL/port and the model id. After a switch the URL still
+        # matches but the config names the old model, so this correctly reports
+        # unbound (a stale binding), prompting a re-bind.
+        running_id = Path(inst.model_path).stem
+        is_bound = model.get("base_url") == base and model.get("default") == running_id
         return {"bound": bool(is_bound),
                 "model_id": model.get("default") if is_bound else None}
 

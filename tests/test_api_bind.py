@@ -82,6 +82,21 @@ def test_bind_status_false_when_url_differs(tmp_path, monkeypatch):
     assert c.get("/api/bind-status", headers=H).json()["bound"] is False
 
 
+def test_bind_status_false_when_model_differs(tmp_path, monkeypatch):
+    # The switch scenario: same port/base_url, but Hermes still names the OLD
+    # model. The badge must NOT claim "bound" — the config is stale.
+    hermes = tmp_path / ".hermes"
+    hermes.mkdir()
+    (hermes / "config.yaml").write_text(
+        "model:\n  default: Some-Other-Model\n  base_url: http://127.0.0.1:8080/v1\n"
+        "providers: {}\n")
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    app = _app(FakeManager([_running()]))  # running model id == Qwen3.6-27B-Q8_0
+    c = TestClient(app, client=("127.0.0.1", 12345))
+    b = c.get("/api/bind-status", headers=H).json()
+    assert b["bound"] is False and b["model_id"] is None
+
+
 def test_bind_status_remote_false():
     app = _app(FakeManager([_running()]))
     assert TestClient(app).get("/api/bind-status", headers=H).json()["bound"] is False

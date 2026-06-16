@@ -71,7 +71,6 @@ function renderTopbar() {
       <a class="btn ghost" href="${esc(openUrl)}" target="_blank" rel="noopener"
          title="Open the model server's built-in page (${esc(openUrl)})"
          style="padding:4px 10px;font-size:12px;text-decoration:none">Open server ↗</a>
-      <button class="btn" id="btn-connect" style="padding:4px 10px;font-size:12px">Connect an agent…</button>
       <button class="btn danger" id="btn-stop" style="padding:4px 10px;font-size:12px">Stop</button>`;
   } else {
     statusHtml = `<span class="status-label">no server running</span>`;
@@ -105,6 +104,24 @@ function fitWidth(level) {
   return level === "comfortable" ? "85%" : level === "tight" ? "55%" : "20%";
 }
 
+// Group a flat llama-server argv (["-m", path, "-ngl", "999", ...]) into one
+// line per flag: a "-flag" followed by a non-flag token is its value, so they
+// pair up; bare/boolean flags stand alone.
+function flagsToLines(flags) {
+  const lines = [];
+  for (let i = 0; i < flags.length; i++) {
+    const tok = String(flags[i]);
+    const next = i + 1 < flags.length ? String(flags[i + 1]) : null;
+    if (tok.startsWith("-") && next !== null && !next.startsWith("-")) {
+      lines.push(tok + " " + next);
+      i++;  // consumed the value
+    } else {
+      lines.push(tok);
+    }
+  }
+  return lines;
+}
+
 // ── Detail panel ──────────────────────────────────────────────────────
 function renderDetail() {
   if (!selected) {
@@ -114,15 +131,32 @@ function renderDetail() {
   }
   const rec = selected;
   const fit = rec.fit || {};
-  const flagsText = (rec.flags || []).join(" \\\n  ");
+  const flagsText = flagsToLines(rec.flags || []).join(" \\\n  ");
   const warningsHtml = (rec.warnings || []).length
     ? `<div class="warnings">${rec.warnings.map(w => `<div class="warn-item">⚠ ${esc(w)}</div>`).join("")}</div>`
     : "";
 
   const runningServer = servers[0];
-  const isRunning = !!runningServer;
-  const startLabel = isRunning ? "Switch" : "Start";
-  const startClass = isRunning ? "btn" : "btn";
+  const anyRunning = !!runningServer;
+  const isLive = anyRunning && runningServer.model === rec.model;  // this model is the running one
+  const isBound = isLive && bound.bound;  // bound ⇒ Hermes points at the running model (#2)
+
+  let actionsHtml;
+  if (isLive) {
+    // The running model is the only state where an agent can be connected.
+    const connectLabel = isBound ? "✓ Connected to Hermes" : "Connect an agent…";
+    const connectTitle = isBound
+      ? "Hermes is pointed at this model — click to re-bind"
+      : "Bind Hermes (or any OpenAI-compatible app) to this running model";
+    actionsHtml = `<button id="btn-connect" class="btn" title="${esc(connectTitle)}">${connectLabel}</button>`;
+  } else {
+    // Not running: must start/switch to it first; connecting is disabled until then.
+    const startLabel = anyRunning ? "Switch" : "Start";
+    actionsHtml =
+      `<button id="btn-start" class="btn">${startLabel}</button>
+       <button id="btn-connect" class="btn ghost" disabled
+         title="Available only on the model that is currently live.">Connect an agent…</button>`;
+  }
 
   return `<div class="main">
     <h1>${esc(rec.model)}</h1>
@@ -135,9 +169,7 @@ function renderDetail() {
     </div>
     ${warningsHtml}
     ${flagsText ? `<div class="detail-row"><span class="lbl">Flags</span></div><pre class="flags">${esc(flagsText)}</pre>` : ""}
-    <div class="actions">
-      <button id="btn-start" class="${startClass}">${startLabel}</button>
-    </div>
+    <div class="actions">${actionsHtml}</div>
   </div>`;
 }
 
@@ -167,6 +199,20 @@ function paint() {
     `</div>` +
     renderDrawer();
   wireEvents();
+  scrollLogsToBottom();  // a full repaint re-renders the log view — keep it tailed
+}
+
+function scrollLogsToBottom() {
+  const logView = document.getElementById("log-view");
+  if (logView) logView.scrollTop = logView.scrollHeight;
+}
+
+// Reset the log view so a switch/start shows only the new model's logs (the
+// daemon truncates server-<port>.log on switch; the WS then re-streams it).
+function clearLogs() {
+  logLines = [];
+  const logView = document.getElementById("log-view");
+  if (logView) logView.innerHTML = "";
 }
 
 function wireEvents() {
@@ -177,7 +223,7 @@ function wireEvents() {
   // Stop button in topbar
   const stopBtn = root.querySelector("#btn-stop");
   if (stopBtn) stopBtn.onclick = doStop;
-  // Connect-an-agent button (topbar, only when a server is running)
+  // Connect-an-agent button (detail pane, enabled only for the running model)
   const connectBtn = root.querySelector("#btn-connect");
   if (connectBtn) connectBtn.onclick = showConnect;
   // Start/Switch button
@@ -208,6 +254,9 @@ async function doStart() {
   const port = (servers[0] && servers[0].port) || 8080;
   const isRunning = servers.length > 0;
 
+  // Reset the log pane so it shows the incoming model's logs, not the previous
+  // model's tail mixed in (the daemon truncates the log file on switch).
+  clearLogs();
   // Loading a model is slow (the daemon waits for /health + a smoke test before
   // returning). Show progress and lock the controls; live logs stream below.
   setBusy(isRunning ? `Switching to ${selected.model}…` : `Starting ${selected.model}…`);
@@ -283,6 +332,13 @@ async function showConnect() {
 
   const modelId = info.model_id || running.model;
   const bindCmd = `lmm bind ${running.model} --port ${running.port}`;
+  // Hermes already points at this running model (#2) → re-binding is a no-op,
+  // so show it as done and disabled rather than an active button.
+  const alreadyBound = !!bound.bound;
+  const bindBtnHtml = alreadyBound
+    ? `<button class="btn" id="btn-bind-now" disabled
+         title="Hermes already points at this model">✓ Hermes is bound to this model</button>`
+    : `<button class="btn" id="btn-bind-now">Bind Hermes on this host</button>`;
   const keyId = "conn-key-input";
   const hasKey = !!info.inference_key;
   const keyFieldHtml = hasKey
@@ -306,7 +362,7 @@ async function showConnect() {
       <div class="connect-section">
         <h4>Using Hermes</h4>
         <p class="modal-sub">On <b>this host</b>, bind in one click:</p>
-        <button class="btn" id="btn-bind-now">Bind Hermes on this host</button>
+        ${bindBtnHtml}
         <p class="modal-sub" style="margin-top:10px">On another machine, run this once
           (updates that machine's <code>~/.hermes/config.yaml</code>):</p>
         <code class="block" id="conn-cmd">${esc(bindCmd)}</code>
@@ -350,8 +406,9 @@ async function showConnect() {
     setTimeout(() => { overlay.querySelector("#btn-copy-cmd").textContent = "Copy command"; }, 1500);
   };
 
-  overlay.querySelector("#btn-bind-now").onclick = async () => {
-    const btn = overlay.querySelector("#btn-bind-now");
+  const bindNowBtn = overlay.querySelector("#btn-bind-now");
+  if (bindNowBtn && !alreadyBound) bindNowBtn.onclick = async () => {
+    const btn = bindNowBtn;
     btn.disabled = true;
     btn.textContent = "Binding…";
     try {
@@ -379,6 +436,10 @@ function onStream(msg) {
     // Append line directly to the log view if present (avoid full repaint)
     const logView = document.getElementById("log-view");
     if (logView) {
+      // Follow the tail only if already near the bottom, so scrolling up to
+      // read history isn't yanked back down by incoming lines.
+      const nearBottom =
+        logView.scrollHeight - logView.scrollTop - logView.clientHeight < 40;
       const div = document.createElement("div");
       const line = msg.line || "";
       div.className = "log-line" + (/error|fatal|fail/i.test(line) ? " err" : "");
@@ -386,7 +447,7 @@ function onStream(msg) {
       logView.appendChild(div);
       // Cap DOM lines at 500
       while (logView.children.length > 500) logView.removeChild(logView.firstChild);
-      logView.scrollTop = logView.scrollHeight;
+      if (nearBottom) logView.scrollTop = logView.scrollHeight;
     }
   } else if (msg.type === "status") {
     servers = msg.servers || [];
@@ -395,11 +456,10 @@ function onStream(msg) {
     const sideEl = root.querySelector(".side");
     if (topbarEl) topbarEl.outerHTML = renderTopbar();
     if (sideEl) sideEl.outerHTML = renderSidebar();
-    // Rewire events for the rebuilt topbar + sidebar
+    // Rewire events for the rebuilt topbar + sidebar (Connect lives in the
+    // detail pane, which this partial update leaves intact — no rewire needed).
     const stopBtn = root.querySelector("#btn-stop");
     if (stopBtn) stopBtn.onclick = doStop;
-    const connectBtn = root.querySelector("#btn-connect");
-    if (connectBtn) connectBtn.onclick = showConnect;
     root.querySelectorAll(".item[data-name]").forEach((el) => {
       el.onclick = () => selectModel(el.dataset.name);
     });

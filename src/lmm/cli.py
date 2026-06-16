@@ -248,6 +248,14 @@ def _resolve_project_dir(args: argparse.Namespace) -> str | None:
     return str(cand) if (cand / "pyproject.toml").exists() else None
 
 
+def _install_child_path(user: str) -> str:
+    """PATH for install-time subprocesses (uv, llama-server). sudo strips the
+    caller's PATH, so prepend the invoking user's bin dirs — lets
+    `sudo "$(command -v lmm)" install` work without a manual `env PATH=...`."""
+    return ":".join([f"/Users/{user}/.local/bin", "/opt/homebrew/bin",
+                     "/usr/local/bin", os.environ.get("PATH", "")])
+
+
 def cmd_install(args: argparse.Namespace) -> int:
     user = _install_user(args)
     project_dir = _resolve_project_dir(args)
@@ -296,9 +304,11 @@ def cmd_install(args: argparse.Namespace) -> int:
               "replace it in place.")
         return 1
 
+    child_env = {**os.environ, "PATH": _install_child_path(user)}
+
     def _run(cmds, *, critical):
         for c in cmds:
-            subprocess.run(c, shell=True, check=critical)
+            subprocess.run(c, shell=True, check=critical, env=child_env)
 
     # Ordered phases: plist before bootstrap; daemon.json (in the shared dir,
     # later chowned to the user by shared_venv_steps) before the daemon starts.

@@ -1,6 +1,7 @@
 import pytest
 
 from lmm.cli import (
+    _install_child_path,
     _install_user,
     _resolve_project_dir,
     build_parser,
@@ -38,6 +39,14 @@ def test_install_user_resolution(monkeypatch):
 def test_resolve_project_dir_prefers_explicit_arg():
     args = build_parser().parse_args(["install", "--project-dir", "/some/where"])
     assert _resolve_project_dir(args) == "/some/where"
+
+
+def test_install_child_path_prepends_user_bins():
+    # sudo strips PATH; install-time uv/llama-server must still be findable.
+    p = _install_child_path("misha")
+    parts = p.split(":")
+    assert parts[0] == "/Users/misha/.local/bin"   # uv lives here
+    assert "/opt/homebrew/bin" in parts            # llama-server (brew)
 
 
 def test_install_errors_when_project_dir_not_a_project(monkeypatch, tmp_path, capsys):

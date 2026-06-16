@@ -83,19 +83,20 @@ Then open the web UI:
 
 Installs the daemon as a launchd `LaunchDaemon`: it starts at boot, restarts on crash, and **runs as you**. macOS only for now (a Linux/systemd installer is on the roadmap).
 
-Run this **from inside your clone** — `--project-dir "$(pwd)"` tells the installer where to build the daemon's copy from. `sudo` resets `PATH`, so the command also passes an explicit `PATH` to find `uv` and `llama-server`:
+Run this **from inside your clone** — `--project-dir "$(pwd)"` tells the installer where to build the daemon's copy from.
+
+> **Why `sudo "$(command -v lmm)"` and not just `sudo lmm`?** `sudo` resets `PATH` to a minimal system default, so it can't find `lmm` (which lives in `~/.local/bin`). `$(command -v lmm)` is expanded by *your* shell first, handing `sudo` the absolute path. The installer then locates `uv`/`llama-server` for you. (If those live somewhere non-standard, fall back to `sudo env "PATH=$HOME/.local/bin:/opt/homebrew/bin:$PATH" lmm install …`.)
 
 ```bash
-sudo env "PATH=$HOME/.local/bin:/opt/homebrew/bin:$PATH" \
-  lmm install --project-dir "$(pwd)" --models-dir /path/to/models
+sudo "$(command -v lmm)" install --project-dir "$(pwd)" --models-dir /path/to/models
 ```
 
 ```bash
 # preview the exact privileged steps without changing anything:
-sudo env "PATH=$HOME/.local/bin:/opt/homebrew/bin:$PATH" lmm install --dry-run --project-dir "$(pwd)"
+sudo "$(command -v lmm)" install --dry-run --project-dir "$(pwd)"
 
 # rebuild in place later — also from the clone (keeps your token + state):
-sudo env "PATH=$HOME/.local/bin:/opt/homebrew/bin:$PATH" lmm install --reinstall --project-dir "$(pwd)"
+sudo "$(command -v lmm)" install --reinstall --project-dir "$(pwd)"
 ```
 
 The UI is then at **http://127.0.0.1:8770**, with no terminal attached.
@@ -103,15 +104,13 @@ The UI is then at **http://127.0.0.1:8770**, with no terminal attached.
 **Manage the service:**
 
 ```bash
-lmm service status        # installed? responding?  (read-only — no sudo)
-
-# the mutating commands need sudo + the PATH prefix:
-sudo env "PATH=$HOME/.local/bin:$PATH" lmm service stop      # stop it (reloads on next boot)
-sudo env "PATH=$HOME/.local/bin:$PATH" lmm service start     # (re)load it
-sudo env "PATH=$HOME/.local/bin:$PATH" lmm service restart
+lmm service status                       # installed? responding?  (read-only — no sudo)
+sudo "$(command -v lmm)" service stop     # stop it (reloads on next boot)
+sudo "$(command -v lmm)" service start    # (re)load it
+sudo "$(command -v lmm)" service restart
 ```
 
-**To stop the daemon:** `sudo … lmm service stop` (above). Stopping or restarting the service leaves any running **model up** — only the control plane bounces, and it re-adopts the model on restart. To stop the *model* itself, use the UI **Stop** button or `lmm stop`.
+**To stop the daemon:** `sudo "$(command -v lmm)" service stop`. Stopping or restarting the service leaves any running **model up** — only the control plane bounces, and it re-adopts the model on restart. To stop the *model* itself, use the UI **Stop** button or `lmm stop`.
 
 ---
 
@@ -147,7 +146,7 @@ lmm unbind
 # 2. Remove the always-on service — LaunchDaemon, shared state (token/venv/logs),
 #    the /Library/Logs dir, and the firewall rule. Skip if you only ever ran the
 #    foreground daemon (it installs nothing).
-sudo env "PATH=$HOME/.local/bin:$PATH" lmm uninstall
+sudo "$(command -v lmm)" uninstall
 
 # 3. Remove foreground/dev-mode state — only exists if you ran `lmm daemon` directly.
 rm -rf "$HOME/Library/Application Support/local-model-manager"

@@ -80,3 +80,25 @@ def test_classify_optional_metadata_absent():
     m = classify(info, "/tmp/x.gguf")
     assert m.license is None and m.quantized_by is None
     assert m.has_chat_template is False and m.hf_base_repo is None
+
+
+def test_classify_derives_hf_repo_from_author_and_name():
+    # No embedded repo URL, but author + name → best-effort <author>/<name> card.
+    info = GGUFInfo(version=3, metadata={
+        "general.architecture": "qwen35",
+        "general.author": "HauhauCS",
+        "general.name": "Qwen3.6-27B-Uncensored-HauhauCS-Balanced",
+    }, tensor_names=[])
+    m = classify(info, "/tmp/x.gguf")
+    assert m.hf_base_repo == "https://huggingface.co/HauhauCS/Qwen3.6-27B-Uncensored-HauhauCS-Balanced"
+
+
+def test_classify_embedded_link_beats_derived():
+    info = GGUFInfo(version=3, metadata={
+        "general.architecture": "qwen35",
+        "general.author": "HauhauCS",
+        "general.name": "Some-Name",
+        "general.base_model.0.repo_url": "https://huggingface.co/Qwen/Qwen3.6-27B",
+    }, tensor_names=[])
+    m = classify(info, "/tmp/x.gguf")
+    assert m.hf_base_repo == "https://huggingface.co/Qwen/Qwen3.6-27B"  # embedded wins

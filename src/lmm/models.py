@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import quote
 
 from lmm.gguf import GGUFInfo
 
@@ -55,6 +56,16 @@ def _hf_repo_from_link(link: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _hf_repo_from_author_name(author: str, name: str) -> str | None:
+    """Best-effort HF repo from general.author + general.name (HF repos are
+    <user>/<repo>). Resolves exactly when the author published their own model
+    (e.g. HauhauCS/Qwen3.6-27B-Uncensored-HauhauCS-Balanced); only used when no
+    repo URL is embedded, and ranks below embedded links."""
+    if author and name:
+        return f"https://huggingface.co/{quote(author)}/{quote(name)}"
+    return None
+
+
 def classify(info: GGUFInfo, path: str | Path, *,
              shards: list[Path] | None = None,
              sidecars: list[Path] | None = None) -> Model:
@@ -69,11 +80,13 @@ def classify(info: GGUFInfo, path: str | Path, *,
     )
     block_count = md.get(f"{arch}.block_count")
     context_length = md.get(f"{arch}.context_length")
-    # HF model-card link: prefer the license link, fall back to the base-model /
-    # general repo_url that many quants carry.
+    author = (str(md["general.author"]) if md.get("general.author") else None)
+    # HF model-card link: prefer an embedded repo URL (license link / base-model /
+    # general repo_url); else derive <author>/<name> as a best-effort.
     hf_repo = (_hf_repo_from_link(str(md.get("general.license.link", "")))
                or _hf_repo_from_link(str(md.get("general.base_model.0.repo_url", "")))
-               or _hf_repo_from_link(str(md.get("general.repo_url", ""))))
+               or _hf_repo_from_link(str(md.get("general.repo_url", "")))
+               or _hf_repo_from_author_name(author, name))
     return Model(
         path=Path(path),
         arch=arch,
@@ -90,5 +103,5 @@ def classify(info: GGUFInfo, path: str | Path, *,
         license=(str(md["general.license"]) if md.get("general.license") else None),
         quantized_by=(str(md["general.quantized_by"]) if md.get("general.quantized_by") else None),
         has_chat_template=bool(md.get("tokenizer.chat_template")),
-        author=(str(md["general.author"]) if md.get("general.author") else None),
+        author=author,
     )

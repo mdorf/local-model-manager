@@ -106,8 +106,6 @@ rm -rf <path-to-your-clone>    # remove the cloned source + its .venv
 
 `uninstall` never touches your model files — `lmm` only ever reads them — so after these steps nothing of `lmm` remains on the machine.
 
-> **Upgrading from an early `_lmm`-based build?** Run that build's `sudo lmm uninstall` (or manually `sudo dscl . -delete /Users/_lmm` and strip the models-dir ACL) *before* installing this run-as-user version — the current uninstaller no longer manages the old service account.
-
 ## How it runs (topology)
 
 `lmm` is one distributable with two roles: a **host** that manages models, and **clients** that drive it.

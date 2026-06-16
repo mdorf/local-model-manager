@@ -94,3 +94,41 @@ def test_switch_port_in_use_returns_409():
     app = create_app(cfg, manager=Busy(), command_builder=fake_builder)
     r = TestClient(app).post("/api/servers/switch", json={"model": "m", "port": 8080}, headers=H)
     assert r.status_code == 409
+
+
+def test_start_with_flags_override_uses_them():
+    # When the UI sends edited flags, the daemon spawns exactly those (bypassing
+    # the recommended command_builder); model_path comes from the -m value.
+    captured = {}
+
+    class Cap(FakeManager):
+        def start(self, command, *, port, model_path):
+            captured["command"] = command
+            captured["model_path"] = model_path
+            return super().start(command, port=port, model_path=model_path)
+
+    cfg = DaemonConfig(host="127.0.0.1", port=8770, token="t", roots=["/x"])
+    app = create_app(cfg, manager=Cap(), command_builder=fake_builder)
+    flags = ["-m", "/models/Foo.gguf", "-ngl", "999", "-c", "131072", "--port", "8080"]
+    r = TestClient(app).post("/api/servers",
+                             json={"model": "Foo", "port": 8080, "flags": flags}, headers=H)
+    assert r.status_code == 200
+    assert captured["command"] == ["llama-server", *flags]
+    assert captured["model_path"] == "/models/Foo.gguf"
+
+
+def test_switch_with_flags_override_uses_them():
+    captured = {}
+
+    class Cap(FakeManager):
+        def switch(self, command, *, port, model_path):
+            captured["command"] = command
+            return super().switch(command, port=port, model_path=model_path)
+
+    cfg = DaemonConfig(host="127.0.0.1", port=8770, token="t", roots=["/x"])
+    app = create_app(cfg, manager=Cap(), command_builder=fake_builder)
+    flags = ["-m", "/models/Bar.gguf", "-c", "65536", "--port", "8080"]
+    r = TestClient(app).post("/api/servers/switch",
+                             json={"model": "Bar", "port": 8080, "flags": flags}, headers=H)
+    assert r.status_code == 200
+    assert captured["command"] == ["llama-server", *flags]

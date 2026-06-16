@@ -166,6 +166,17 @@ html, body {
   margin: 10px 0;
   line-height: 1.5;
 }
+textarea.flags {
+  display: block;
+  width: 100%;
+  min-height: 230px;
+  resize: vertical;
+  color: var(--fg);
+}
+textarea.flags:focus { outline: none; border-color: var(--accent); }
+.flags-hint { font-size: 11px; color: var(--fg-muted); margin: -2px 0 12px; max-width: 600px; }
+.flags-hint a { color: var(--accent); cursor: pointer; text-decoration: none; }
+.flags-hint a:hover { text-decoration: underline; }
 
 /* Warnings */
 .warnings { margin: 10px 0; }

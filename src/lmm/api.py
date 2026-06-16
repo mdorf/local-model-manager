@@ -45,6 +45,7 @@ class StartServerRequest(BaseModel):
 class SwitchServerRequest(BaseModel):
     model: str
     port: int | None = None
+    flags: list[str] | None = None
 
 
 class BindRequest(BaseModel):
@@ -68,6 +69,17 @@ def _instance_dict(inst: ServerInstance) -> dict:
             "model": Path(inst.model_path).name, "status": inst.status,
             "external": inst.external, "base_url": inst.base_url,
             "started_at": inst.started_at}
+
+
+def _override_command(flags: list[str]) -> tuple[list[str], str]:
+    """Build a llama-server command from a user-supplied flag list (an override of
+    the recommended config). model_path is the value after -m, for the instance record."""
+    model_path = ""
+    if "-m" in flags:
+        i = flags.index("-m")
+        if i + 1 < len(flags):
+            model_path = flags[i + 1]
+    return ["llama-server", *flags], model_path
 
 
 def _model_matches(m, name: str) -> bool:
@@ -161,7 +173,10 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
     @app.post("/api/servers", dependencies=[Depends(auth)])
     def start_server(body: StartServerRequest):
         port = body.port or 8080
-        command, model_path = app.state.command_builder(body.model, port)
+        if body.flags:  # user override of the recommended config (fit-check bypassed)
+            command, model_path = _override_command(body.flags)
+        else:
+            command, model_path = app.state.command_builder(body.model, port)
         try:
             with app.state.lock:
                 inst = app.state.manager.start(command, port=port, model_path=model_path)
@@ -178,7 +193,10 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
     @app.post("/api/servers/switch", dependencies=[Depends(auth)])
     def switch_server(body: SwitchServerRequest):
         port = body.port or 8080
-        command, model_path = app.state.command_builder(body.model, port)
+        if body.flags:  # user override of the recommended config (fit-check bypassed)
+            command, model_path = _override_command(body.flags)
+        else:
+            command, model_path = app.state.command_builder(body.model, port)
         try:
             with app.state.lock:
                 inst = app.state.manager.switch(command, port=port, model_path=model_path)

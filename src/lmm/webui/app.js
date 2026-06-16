@@ -194,7 +194,9 @@ function renderDetail() {
       ${fit.message ? `<div class="fit-msg">${esc(fit.message)}</div>` : ""}
     </div>
     ${warningsHtml}
-    ${flagsText ? `<div class="detail-row"><span class="lbl">Flags</span></div><pre class="flags">${esc(flagsText)}</pre>` : ""}
+    ${flagsText ? `<div class="detail-row"><span class="lbl">Flags</span></div>
+      <textarea class="flags" id="flags-edit" spellcheck="false">${esc(flagsText)}</textarea>
+      <div class="flags-hint">Editable — changes apply to the next Start/Switch (the RAM fit-check won't re-run). <a id="flags-reset">Reset to recommended</a></div>` : ""}
     <div class="actions">${actionsHtml}</div>
   </div>`;
 }
@@ -255,6 +257,12 @@ function wireEvents() {
   // Start/Switch button
   const startBtn = root.querySelector("#btn-start");
   if (startBtn) startBtn.onclick = doStart;
+  // Reset edited flags back to the recommended config
+  const flagsReset = root.querySelector("#flags-reset");
+  if (flagsReset) flagsReset.onclick = () => {
+    const ta = document.getElementById("flags-edit");
+    if (ta && selected) ta.value = flagsToLines(selected.flags || []).join(" \\\n  ");
+  };
 }
 
 // ── Model selection ───────────────────────────────────────────────────
@@ -265,6 +273,18 @@ async function selectModel(name) {
   } catch (e) {
     handleError(e);
   }
+}
+
+// Read user-edited flags as a token list, or null if unchanged from the
+// recommendation. Strips the "\<newline>" line continuations, then splits on
+// whitespace (paths with spaces would need quoting — uncommon for model dirs).
+function readFlagOverride() {
+  const ta = document.getElementById("flags-edit");
+  if (!ta || !selected) return null;
+  const original = flagsToLines(selected.flags || []).join(" \\\n  ");
+  if (ta.value.trim() === original.trim()) return null;
+  const toks = ta.value.replace(/\\\s*\n/g, " ").trim().split(/\s+/).filter(Boolean);
+  return toks.length ? toks : null;
 }
 
 // ── Start / Switch ────────────────────────────────────────────────────
@@ -279,6 +299,7 @@ async function doStart() {
 
   const port = (servers[0] && servers[0].port) || 8080;
   const isRunning = servers.length > 0;
+  const override = readFlagOverride();  // null unless the user edited the flags
 
   // Reset the log pane so it shows the incoming model's logs, not the previous
   // model's tail mixed in (the daemon truncates the log file on switch).
@@ -288,9 +309,9 @@ async function doStart() {
   setBusy(isRunning ? `Switching to ${selected.model}…` : `Starting ${selected.model}…`);
   try {
     if (isRunning) {
-      await api.switch(selected.model, port);
+      await api.switch(selected.model, port, override);
     } else {
-      await api.start(selected.model, 8080);
+      await api.start(selected.model, 8080, override);
     }
     await refresh();
   } catch (e) {

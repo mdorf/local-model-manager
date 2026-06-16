@@ -83,7 +83,7 @@ Then open the web UI:
 
 Installs the daemon as a launchd `LaunchDaemon`: it starts at boot, restarts on crash, and **runs as you**. macOS only for now (a Linux/systemd installer is on the roadmap).
 
-`sudo` resets `PATH`, so the install command needs an explicit `PATH` to find `uv` and `llama-server`:
+Run this **from inside your clone** — `--project-dir "$(pwd)"` tells the installer where to build the daemon's copy from. `sudo` resets `PATH`, so the command also passes an explicit `PATH` to find `uv` and `llama-server`:
 
 ```bash
 sudo env "PATH=$HOME/.local/bin:/opt/homebrew/bin:$PATH" \
@@ -92,10 +92,10 @@ sudo env "PATH=$HOME/.local/bin:/opt/homebrew/bin:$PATH" \
 
 ```bash
 # preview the exact privileged steps without changing anything:
-sudo env "PATH=$HOME/.local/bin:/opt/homebrew/bin:$PATH" lmm install --dry-run
+sudo env "PATH=$HOME/.local/bin:/opt/homebrew/bin:$PATH" lmm install --dry-run --project-dir "$(pwd)"
 
-# rebuild in place later (keeps your token + state):
-sudo env "PATH=$HOME/.local/bin:/opt/homebrew/bin:$PATH" lmm install --reinstall
+# rebuild in place later — also from the clone (keeps your token + state):
+sudo env "PATH=$HOME/.local/bin:/opt/homebrew/bin:$PATH" lmm install --reinstall --project-dir "$(pwd)"
 ```
 
 The UI is then at **http://127.0.0.1:8770**, with no terminal attached.

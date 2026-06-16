@@ -236,9 +236,27 @@ def _install_user(args: argparse.Namespace) -> str:
     return args.user or os.environ.get("SUDO_USER") or getpass.getuser()
 
 
+def _resolve_project_dir(args: argparse.Namespace) -> str | None:
+    """Directory to `uv pip install` the package from (must hold pyproject.toml).
+    Explicit --project-dir, else the editable-dev src layout
+    (<clone>/src/lmm/cli.py -> <clone>). A uv-tool-installed cli.py lives in
+    site-packages, so the src-layout guess does NOT resolve there -- that's why
+    --project-dir is required for an installed CLI (both install and reinstall)."""
+    if args.project_dir:
+        return args.project_dir
+    cand = Path(__file__).resolve().parents[2]
+    return str(cand) if (cand / "pyproject.toml").exists() else None
+
+
 def cmd_install(args: argparse.Namespace) -> int:
     user = _install_user(args)
-    project_dir = args.project_dir or str(Path(__file__).resolve().parents[2])
+    project_dir = _resolve_project_dir(args)
+    if not project_dir or not (Path(project_dir) / "pyproject.toml").exists():
+        print("could not locate the local-model-manager source to install from.\n"
+              "Re-run with --project-dir pointing at your clone, e.g.:\n"
+              '  sudo env "PATH=$HOME/.local/bin:/opt/homebrew/bin:$PATH" \\\n'
+              '    lmm install --project-dir "$(pwd)" --models-dir /path/to/models')
+        return 1
     exec_path = deploy.shared_venv_exec(SHARED_DIR)
     # Run as the owning user: set HOME so the daemon resolves ~/.hermes (for
     # one-click bind) and its state dir correctly.

@@ -161,8 +161,11 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
     def start_server(body: StartServerRequest):
         port = body.port or 8080
         command, model_path = app.state.command_builder(body.model, port)
-        with app.state.lock:
-            inst = app.state.manager.start(command, port=port, model_path=model_path)
+        try:
+            with app.state.lock:
+                inst = app.state.manager.start(command, port=port, model_path=model_path)
+        except RuntimeError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
         return _instance_dict(inst)
 
     @app.delete("/api/servers/{port}", dependencies=[Depends(auth)])
@@ -175,8 +178,11 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
     def switch_server(body: SwitchServerRequest):
         port = body.port or 8080
         command, model_path = app.state.command_builder(body.model, port)
-        with app.state.lock:
-            inst = app.state.manager.switch(command, port=port, model_path=model_path)
+        try:
+            with app.state.lock:
+                inst = app.state.manager.switch(command, port=port, model_path=model_path)
+        except RuntimeError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
         return _instance_dict(inst)
 
     @app.get("/api/connection-info", dependencies=[Depends(auth)])

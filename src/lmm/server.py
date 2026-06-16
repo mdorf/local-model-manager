@@ -9,7 +9,7 @@ from pathlib import Path
 
 from lmm.discovery import discover_models
 from lmm.health import is_healthy, served_model_id, smoke_test, wait_for_health
-from lmm.ports import is_port_in_use
+from lmm.ports import is_port_in_use, listening_pid
 from lmm.process import pid_alive, spawn, stop_proc, terminate_pid
 from lmm.state import InstanceRecord, load_instances, mutate_instances, state_dir
 
@@ -82,16 +82,20 @@ class ServerManager:
         proc = self._procs.get(port)
         if proc is not None:
             ok = stop_proc(proc, timeout=timeout)
-        elif rec is not None and not rec.external:
+        elif rec is not None and rec.pid > 0:
+            # Cross-process or adopted server we have a real pid for — an
+            # explicit stop/switch terminates it (adopt captures the pid). A
+            # pid-less record (-1) is just forgotten; we can't kill what we can't find.
             ok = terminate_pid(rec.pid, timeout=timeout)
         self.forget(port)
         return ok
 
     def switch(self, command: list[str], *, port: int, model_path: str,
                ready_timeout: float = 120.0) -> ServerInstance:
+        # Single-model policy: stop every running server (including an adopted
+        # one occupying the target port) before starting the replacement.
         for rec in load_instances():
-            if not rec.external:
-                self.stop(rec.port)
+            self.stop(rec.port)
         return self.start(command, port=port, model_path=model_path,
                           ready_timeout=ready_timeout)
 
@@ -105,10 +109,13 @@ class ServerManager:
         # model, not "(external)". Caller may pass a resolved file path instead.
         if model_path is None:
             model_path = served_model_id(base) or "(external)"
-        rec = InstanceRecord(port=port, pid=-1, model_path=model_path,
+        # Capture the real listening pid so an explicit stop/switch can terminate
+        # this server (falls back to -1 = "known to be running, pid unknown").
+        pid = listening_pid(port) or -1
+        rec = InstanceRecord(port=port, pid=pid, model_path=model_path,
                              started_at=time.time(), external=True)
         self._upsert(rec)
-        return ServerInstance(port=port, pid=-1, model_path=model_path,
+        return ServerInstance(port=port, pid=pid, model_path=model_path,
                               started_at=rec.started_at, status="ready",
                               external=True)
 

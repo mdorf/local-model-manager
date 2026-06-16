@@ -69,3 +69,28 @@ def test_model_matches_accepts_filename_path_and_stem():
     assert _model_matches(m, "/Users/Shared/models/Qwen3.6-27B-Q8_0.gguf")  # full path
     assert _model_matches(m, "Qwen3.6-27B-Q8_0")                  # stem (the fix)
     assert not _model_matches(m, "Qwen3.6-27B-NEO")               # non-match
+
+
+def test_start_port_in_use_returns_409():
+    # A port-in-use RuntimeError from the manager must surface as a clean 409,
+    # not a raw 500 (regression: switching onto an occupied port 500'd).
+    class Busy(FakeManager):
+        def start(self, command, *, port, model_path):
+            raise RuntimeError(f"port {port} is already in use / managed")
+
+    cfg = DaemonConfig(host="127.0.0.1", port=8770, token="t", roots=["/x"])
+    app = create_app(cfg, manager=Busy(), command_builder=fake_builder)
+    r = TestClient(app).post("/api/servers", json={"model": "m", "port": 8080}, headers=H)
+    assert r.status_code == 409
+    assert "in use" in r.json()["detail"]
+
+
+def test_switch_port_in_use_returns_409():
+    class Busy(FakeManager):
+        def switch(self, command, *, port, model_path):
+            raise RuntimeError(f"port {port} is already in use / managed")
+
+    cfg = DaemonConfig(host="127.0.0.1", port=8770, token="t", roots=["/x"])
+    app = create_app(cfg, manager=Busy(), command_builder=fake_builder)
+    r = TestClient(app).post("/api/servers/switch", json={"model": "m", "port": 8080}, headers=H)
+    assert r.status_code == 409

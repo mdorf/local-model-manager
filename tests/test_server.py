@@ -74,6 +74,7 @@ def test_adopt_external_server(mgr):
         assert inst is not None
         assert inst.external is True
         assert inst.status in ("ready", "running")
+        assert inst.pid == proc.pid          # captured the real listening pid
         assert any(r.port == port and r.external for r in mgr.list())
     finally:
         proc.terminate()
@@ -167,3 +168,52 @@ def test_autodetect_skips_already_managed_port(mgr, monkeypatch):
     adopted = s.autodetect_servers(mgr, roots=["/x"], ports=[8080])
     assert adopted == []  # didn't clobber the managed port
     assert mgr.list()[0].model_path == "/models/Already.gguf"
+
+
+# --- adopted servers are now fully manageable (real pid → explicit stop/switch kills them) ---
+
+def test_listening_pid_finds_the_listener(mgr):
+    from lmm.ports import listening_pid
+    port = pick_free_port(start=49840)
+    proc = subprocess.Popen(_fake_cmd(port))
+    try:
+        from lmm.health import wait_for_health
+        assert wait_for_health(f"http://127.0.0.1:{port}", timeout=10.0)
+        assert listening_pid(port) == proc.pid
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
+def test_stop_terminates_adopted_by_pid(mgr, monkeypatch):
+    # An adopted server has a real pid → explicit stop must terminate it by pid.
+    # (Monkeypatched so we don't create an unreapable zombie: in production the
+    # adopted process is reparented to launchd, which reaps it on death.)
+    import lmm.server as s
+    killed = []
+    monkeypatch.setattr(s, "is_healthy", lambda base, **k: True)
+    monkeypatch.setattr(s, "listening_pid", lambda port: 4242)
+    monkeypatch.setattr(s, "terminate_pid", lambda pid, timeout=10.0: killed.append(pid) or True)
+    inst = mgr.adopt(48090, model_path="/m/x.gguf")
+    assert inst.pid == 4242                       # adopt captured the listening pid
+    assert mgr.stop(48090) is True
+    assert killed == [4242]                       # terminated by the captured pid
+    assert all(r.port != 48090 for r in mgr.list())
+
+
+def test_switch_terminates_adopted_then_starts(mgr, monkeypatch):
+    # Switching while an adopted server is recorded must stop (kill) it, not 500.
+    import lmm.server as s
+    killed = []
+    monkeypatch.setattr(s, "is_healthy", lambda base, **k: True)
+    monkeypatch.setattr(s, "listening_pid", lambda port: 4242)
+    monkeypatch.setattr(s, "terminate_pid", lambda pid, timeout=10.0: killed.append(pid) or True)
+    mgr.adopt(48091, model_path="/m/old.gguf")    # adopted record present
+    p = pick_free_port(start=49900)               # start the replacement on a real port
+    inst = mgr.switch(_fake_cmd(p), port=p, model_path="/m/new.gguf", ready_timeout=10.0)
+    try:
+        assert inst.status == "ready"
+        assert 4242 in killed                     # the adopted server was terminated
+        assert all(r.port != 48091 for r in mgr.list())   # its record is gone
+    finally:
+        mgr.stop(p)

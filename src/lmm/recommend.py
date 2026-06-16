@@ -11,6 +11,11 @@ from lmm.models import Model
 
 _CONTEXT_LADDER = [131072, 65536, 32768, 16384, 8192]
 _DEFAULT_CACHE = "q8_0"
+# Pick the context against a tighter budget than the fit-check uses: target
+# leaving ~30% of total RAM free (vs the fit-check's ~15%), so context only
+# claims a large KV cache when there's genuine headroom. On a roomy box the
+# model's full window still fits and is kept; tighter boxes auto-step-down.
+_CONTEXT_RAM_FRACTION = 0.70
 
 
 def choose_context(arch: str, metadata: dict, weights: int, model_max: int,
@@ -46,8 +51,11 @@ def recommend_config(model: Model, metadata: dict, hardware: HardwareInfo, *,
                      api_key: str | None = None) -> LaunchConfig:
     weights = weights_bytes(model.shards)
     model_max = model.context_length or 8192
+    # Select context against a tighter headroom budget; classify fit against the
+    # (more permissive) usable-RAM figure so the chosen context reads as comfortable.
+    context_budget = int(hardware.total_ram_bytes * _CONTEXT_RAM_FRACTION)
     context = choose_context(model.arch, metadata, weights, model_max,
-                             hardware.usable_ram_bytes, cache_type)
+                             context_budget, cache_type)
     estimate = estimate_memory(model.arch, metadata, model.shards, context, cache_type)
     fit = assess_fit(estimate.total_bytes, weights, hardware.usable_ram_bytes)
 

@@ -79,3 +79,22 @@ def test_recommend_drops_only_the_unsupported_group(tmp_path):
     assert "999" not in cfg.flags                 # its value dropped with it
     assert "--spec-type" in cfg.flags             # unrelated group unaffected
     assert any("-ngl" in w for w in cfg.warnings)
+
+
+def test_recommend_keeps_full_window_when_roomy(tmp_path, monkeypatch):
+    # Plenty of RAM (weights tiny): the model's full 262144 window fits within the
+    # ~30%-free budget, so it's kept.
+    monkeypatch.setattr("lmm.recommend.weights_bytes", lambda shards: 1000)
+    m = _model(tmp_path, has_mtp=True, size_bytes=1000)
+    cfg = recommend_config(m, _META, _hw(64), supported=_SUPPORTED)
+    assert int(cfg.flags[cfg.flags.index("-c") + 1]) == 262144
+
+
+def test_recommend_steps_down_context_for_tight_headroom(tmp_path, monkeypatch):
+    # Big weights: the full 262144 window would breach the ~30%-free budget even
+    # though it'd still "fit" usable RAM — so context steps down to leave headroom.
+    monkeypatch.setattr("lmm.recommend.weights_bytes", lambda shards: 40 * 1024**3)
+    m = _model(tmp_path, has_mtp=True, size_bytes=1000)
+    cfg = recommend_config(m, _META, _hw(64), supported=_SUPPORTED)
+    ctx = int(cfg.flags[cfg.flags.index("-c") + 1])
+    assert ctx < 262144 and ctx in (131072, 65536, 32768, 16384, 8192)

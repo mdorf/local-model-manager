@@ -1,33 +1,30 @@
 # local-model-manager (`lmm`)
 
-Manage local [llama.cpp](https://github.com/ggml-org/llama.cpp) model servers on a shared host and bind agent clients to them — with hardware-aware, model-aware launch configs and a web UI.
+A **lean manager for local [llama.cpp](https://github.com/ggml-org/llama.cpp) models** — discover what's on disk, launch each with a hardware-tuned config, switch between them from a web UI, and point your agent at whichever one is running. **Built for people running [Hermes](https://hermes-agent.nousresearch.com/) (or any OpenAI-compatible agent) against their own hardware** — without the weight of Ollama or LM Studio.
+
+`lmm` is deliberately small: it manages the `llama-server` instances you already run, rather than bundling its own model runtime, registry, or chat UI. If you have llama.cpp, your GGUF files, and an agent, `lmm` is the thin layer that ties them together.
 
 `lmm` lets you:
 
 - **Discover** every local model on disk, classified from its GGUF header (not from file names).
-- Get a **recommended `llama-server` configuration** for any model. `lmm` reads the model's GGUF metadata *and* profiles the machine it runs on — CPU/core layout, total and usable RAM, Metal/GPU availability — then computes a launch config (context length, KV-cache quantization, GPU layers, threads, speculative decoding) tuned to *that* hardware, with a **fit-check** that warns when a model won't comfortably fit in RAM and names the culprit.
-- **Start / stop / switch** the running model from a **web UI** or the CLI (spawn → readiness-gate → smoke-test → supervise).
-- **Connect an agent** to the running model — one click on the host.
-- Run as an always-on **system daemon** with a token-gated HTTP control plane, drivable from any machine on your LAN.
+- Get a **recommended `llama-server` config** for any model — computed from the GGUF metadata *and* the machine's hardware (cores, usable RAM, Metal/GPU), with a **fit-check** that warns when a model won't comfortably fit in RAM and names the culprit.
+- **Start / stop / switch** the running model from a **web UI** or the CLI.
+- **Connect an agent** ([Hermes](https://hermes-agent.nousresearch.com/), or any OpenAI-compatible app) to the running model — one click on the host.
+- Run as an always-on **system service** with a token-gated HTTP control plane, drivable from any machine on your LAN.
 
-**Binding [Hermes](https://hermes-agent.nousresearch.com/).** `lmm`'s first-class agent integration is **Hermes Agent** (Nous Research). "Connect an agent" repoints Hermes at the running model — it registers the local server as a custom OpenAI-compatible provider (`base_url` + model id) and sets it as Hermes's default — so your agent talks to the local model instead of a cloud API, and follows along when you switch models. On the host that's one click in the UI; from another machine it's a single `lmm bind` command. (Any OpenAI-compatible app works too — the UI shows the base URL and model id to paste.)
+**The Hermes connection.** "Connect an agent" repoints Hermes at the running model — it registers your local server as a custom OpenAI-compatible provider and sets it as Hermes's default, so your agent talks to your local model and follows along when you switch. One click on the host; a single `lmm bind` from any other machine. (Any OpenAI-compatible app works too — the UI shows the base URL and model id to paste.)
 
-> **⚠️ `lmm` must run on the same machine as llama.cpp and your models.** The control daemon spawns and supervises `llama-server` and reads the GGUF files off local disk, so it has to live on the model host — it cannot be pointed at a remote llama.cpp. Browsers, the `lmm` CLI in client mode, and agents like Hermes can run on *any* machine on the LAN; only the daemon is pinned to the host. See [How it runs](#how-it-runs-topology).
+> **⚠️ `lmm` must run on the same machine as llama.cpp and your models.** The daemon spawns and supervises `llama-server` and reads the GGUF files off local disk, so it has to live on the model host — it cannot be pointed at a remote llama.cpp. Browsers, the `lmm` CLI in client mode, and agents can run on *any* LAN machine; only the daemon is pinned to the host. See [How it runs](#how-it-runs-topology).
 
-> **Status:** backend, CLI, control daemon, and web UI are implemented and tested. Interfaces are pre-1.0 and may change. See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and [ROADMAP.md](ROADMAP.md) for the plan.
+> **Status:** backend, CLI, daemon, and web UI are implemented and tested. Interfaces are pre-1.0 and may change. See [ARCHITECTURE.md](ARCHITECTURE.md) and [ROADMAP.md](ROADMAP.md).
 
-## Requirements
+---
 
-- **Python ≥ 3.11** and [`uv`](https://github.com/astral-sh/uv)
-- **llama.cpp** with `llama-server` on your `PATH` (e.g. `brew install llama.cpp`)
-- One or more directories of `.gguf` models
-- macOS for the always-on system installer (`lmm install` uses launchd). The CLI and daemon themselves are cross-platform.
+## Install
 
-## Getting started
+Run everything below **on the machine that holds your model files and will run llama.cpp** — `lmm` has to live there (see the co-location note above).
 
-> Run these on the machine that has your models and llama.cpp (see the co-location note above).
-
-### 1. Install the dependencies
+### 1. Prerequisites
 
 **[`uv`](https://github.com/astral-sh/uv)** — manages Python ≥ 3.11 for you:
 
@@ -35,76 +32,136 @@ Manage local [llama.cpp](https://github.com/ggml-org/llama.cpp) model servers on
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-**llama.cpp** — provides `llama-server`, which must be on your `PATH`. On macOS the simplest route is via [Homebrew](https://brew.sh) (install Homebrew first if you don't have it):
+**llama.cpp** — provides `llama-server`, which must be on your `PATH`. If you don't already have it, the simplest route on macOS is [Homebrew](https://brew.sh):
 
 ```bash
 brew install llama.cpp
 ```
 
-On other platforms, install llama.cpp any way you like — a package manager, or [build from source](https://github.com/ggml-org/llama.cpp) — `lmm` only needs the resulting `llama-server` binary on your `PATH`.
+On other platforms install llama.cpp any way you like (package manager or [build from source](https://github.com/ggml-org/llama.cpp)); `lmm` only needs the `llama-server` binary on your `PATH`.
 
-### 2. Get `lmm` and start the daemon
+### 2. Get `lmm`
 
 ```bash
 git clone https://github.com/mdorf/local-model-manager.git
 cd local-model-manager
+uv tool install .        # installs the `lmm` command onto your PATH
 ```
 
-If your models live in `~/models`, just start the daemon:
+Confirm it's available — this should print the help:
 
 ```bash
-uv run lmm daemon
+lmm --help
 ```
 
-Otherwise point it at your models directory (persisted after the first run):
+> If `lmm` isn't found, `uv`'s tool directory isn't on your `PATH`. Run `uv tool update-shell`, then open a new terminal.
+
+**These two steps (clone + `uv tool install .`) are the shared foundation for both ways of running the daemon below.** Foreground and always-on are *alternatives* — pick one; the clone can stay where it is, the installed service builds its own copy.
+
+---
+
+## Run the daemon
+
+Choose **one** of the two modes.
+
+### Option A — Foreground (try it out)
+
+Runs in your terminal; stops when you close it. No `sudo`, no system changes — ideal for a first look.
 
 ```bash
-LMM_MODELS_DIR=/path/to/models uv run lmm daemon
+lmm daemon                                   # models in ~/models
+LMM_MODELS_DIR=/path/to/models lmm daemon     # or point it elsewhere (persisted after first run)
 ```
 
-`uv` builds the virtualenv from `uv.lock` on first run.
-
-### 3. Open the web UI
+Then open the web UI:
 
 **→ http://127.0.0.1:8770**
 
-On the local host the daemon injects its auth token automatically, so it just loads — pick a model, see its recommended config and RAM fit, and **Start** it. Use **Switch** to change models, **Stop** to unload, and **Connect an agent** to point Hermes at the running model in one click.
+**To stop:** press **Ctrl-C** in that terminal. (That stops the *daemon*. Any model you started keeps running — stop it with the **Stop** button in the UI, or `lmm stop`.)
 
-The daemon runs in the foreground here (Ctrl-C to stop it) — ideal for trying it out. To run it always-on without a terminal, see [Run as an always-on service](#run-as-an-always-on-service-macos).
+### Option B — Always-on service (survives logout & reboot)
 
-## Run as an always-on service (macOS)
+Installs the daemon as a launchd `LaunchDaemon`: it starts at boot, restarts on crash, and **runs as you**. macOS only for now (a Linux/systemd installer is on the roadmap).
 
-Getting started runs the daemon in the **foreground** (Ctrl-C to stop — works on any platform). To keep it running across logout and reboot without a terminal, install it as a launchd `LaunchDaemon`: it starts at boot, restarts on crash, and **runs as you** (the user who runs `sudo lmm install`, or `--user <name>`). `sudo` is needed for the privileged steps — preview them with `--dry-run` first. (macOS only for now — a Linux/systemd installer is on the roadmap; the daemon itself is cross-platform.)
+`sudo` resets `PATH`, so the install command needs an explicit `PATH` to find `uv` and `llama-server`:
 
 ```bash
-# root must be able to find uv + llama-server, hence the explicit PATH:
 sudo env "PATH=$HOME/.local/bin:/opt/homebrew/bin:$PATH" \
-  .venv/bin/lmm install --project-dir "$(pwd)" --models-dir /path/to/models
-
-sudo .venv/bin/lmm install --dry-run        # preview the exact privileged steps
-sudo .venv/bin/lmm install --reinstall      # rebuild in place (keeps token + state)
+  lmm install --project-dir "$(pwd)" --models-dir /path/to/models
 ```
-
-### Stop / start / restart the installed daemon
 
 ```bash
-lmm service status        # installed? responding? (read-only, no sudo)
-sudo lmm service stop     # stop it (the plist stays, so it reloads on next boot)
-sudo lmm service start    # (re)load it
-sudo lmm service restart
+# preview the exact privileged steps without changing anything:
+sudo env "PATH=$HOME/.local/bin:/opt/homebrew/bin:$PATH" lmm install --dry-run
+
+# rebuild in place later (keeps your token + state):
+sudo env "PATH=$HOME/.local/bin:/opt/homebrew/bin:$PATH" lmm install --reinstall
 ```
 
-Stopping or restarting the service leaves any running model **up** — only the control plane bounces, and it re-adopts the model on restart. (Foreground daemon? Just Ctrl-C. Note `lmm stop`, by contrast, stops the *model server*, not the daemon.)
+The UI is then at **http://127.0.0.1:8770**, with no terminal attached.
 
-### Uninstall (remove completely)
+**Manage the service:**
 
 ```bash
-lmm unbind                     # (optional) revert your Hermes config to its pre-bind state
-sudo .venv/bin/lmm uninstall   # remove the LaunchDaemon + shared state dir (token, venv, logs)
-rm -rf <path-to-your-clone>    # remove the cloned source + its .venv
+lmm service status        # installed? responding?  (read-only — no sudo)
+
+# the mutating commands need sudo + the PATH prefix:
+sudo env "PATH=$HOME/.local/bin:$PATH" lmm service stop      # stop it (reloads on next boot)
+sudo env "PATH=$HOME/.local/bin:$PATH" lmm service start     # (re)load it
+sudo env "PATH=$HOME/.local/bin:$PATH" lmm service restart
 ```
 
-`uninstall` never touches your model files — `lmm` only ever reads them — so after these steps nothing of `lmm` remains on the machine.
+**To stop the daemon:** `sudo … lmm service stop` (above). Stopping or restarting the service leaves any running **model up** — only the control plane bounces, and it re-adopts the model on restart. To stop the *model* itself, use the UI **Stop** button or `lmm stop`.
+
+---
+
+## Using the web UI
+
+Open **http://127.0.0.1:8770**. On the local host the daemon injects its auth token automatically, so it just loads.
+
+![Model list](assets/ui-model-list.png)
+
+Pick a model in the sidebar to see its **recommended config** and **RAM fit-check**. You can change the context length, edit the launch flags, then **Start** it.
+
+![Model detail and recommendation](assets/ui-detail.png)
+
+Once a model is running, watch its live logs in the drawer, and use **Switch** to change models or **Stop** to unload.
+
+![Live logs](assets/ui-logs.png)
+
+Click **Connect an agent** to point Hermes at the running model in one click (host only), or copy the OpenAI-compatible base URL + model id to use from any other app.
+
+![Connect an agent](assets/ui-connect.png)
+
+---
+
+## Uninstall (complete removal)
+
+These steps remove **everything** `lmm` creates — service, CLI, state, and the Hermes binding — leaving the machine as if it were never installed. (`lmm` only ever *reads* your model files, so they're never touched.) Run them in order; steps 1–2 use `lmm`, so do them before step 4 removes it.
+
+```bash
+# 1. Revert the Hermes binding (restores your pre-bind config and deletes the
+#    backup). A no-op if you never connected an agent.
+lmm unbind
+
+# 2. Remove the always-on service — LaunchDaemon, shared state (token/venv/logs),
+#    the /Library/Logs dir, and the firewall rule. Skip if you only ever ran the
+#    foreground daemon (it installs nothing).
+sudo env "PATH=$HOME/.local/bin:$PATH" lmm uninstall
+
+# 3. Remove foreground/dev-mode state — only exists if you ran `lmm daemon` directly.
+rm -rf "$HOME/Library/Application Support/local-model-manager"
+
+# 4. Remove the `lmm` command.
+uv tool uninstall local-model-manager
+
+# 5. Remove the cloned source (and its build venv).
+rm -rf <path-to-your-clone>
+```
+
+After these steps, nothing of `lmm` remains on the machine.
+
+---
 
 ## How it runs (topology)
 
@@ -112,15 +169,15 @@ rm -rf <path-to-your-clone>    # remove the cloned source + its .venv
 
 | Component | Where it runs |
 |---|---|
-| **`lmm` control daemon** (`:8770`) | **On the model host** — it spawns/supervises `llama-server`, so it must live where the models and llama.cpp are. |
+| **`lmm` daemon** (`:8770`) | **On the model host** — it spawns `llama-server` and reads the GGUF files, so it must live where the models are. |
 | **`llama-server`** (`:8080`) | On the host, spawned by the daemon. |
-| **Web UI / `lmm` client** | Any machine on the LAN — a browser pointed at the daemon, or `lmm` in client mode. |
-| **Hermes (or any agent)** | Anywhere — it just needs HTTP access to the host's `:8080/v1`. |
+| **Web UI / `lmm` client** | Any LAN machine — a browser, or `lmm` in client mode. |
+| **Hermes / any agent** | Anywhere — it just needs HTTP access to the host's `:8080/v1`. |
 
 ```
                                         LAN
   ┌─────────────────┐           ┌─ Host ───────────────────────────────────┐
-  │  Browser / CLI  │◀── HTTP ─▶│ lmm control daemon   :8770               │
+  │  Browser / CLI  │◀── HTTP ─▶│ lmm daemon   :8770                       │
   │     (client)    │           │      │  spawns / supervises              │
   └─────────────────┘           │      ▼                                   │
   ┌─────────────────┐           │ llama-server   :8080   (/v1)             │
@@ -129,43 +186,31 @@ rm -rf <path-to-your-clone>    # remove the cloned source + its .venv
   └─────────────────┘           └──────────────────────────────────────────┘
 ```
 
-By default the daemon binds **loopback** (`127.0.0.1`); pass `--host 0.0.0.0` to expose it on the LAN so other machines can connect (see [Security](#security)).
+The daemon binds **loopback** (`127.0.0.1`) by default; pass `--host 0.0.0.0` to expose it on the LAN (see [Security](#security)).
 
 ## CLI
 
-Everything in the UI is also available on the CLI. With a daemon running, `serve` / `stop` / `status` / `switch` are routed through it; otherwise they act locally.
+Everything in the UI is on the CLI too. With a daemon running, `serve` / `stop` / `status` / `switch` route through it; otherwise they act locally.
 
 ```bash
-# Discover + inspect
-uv run lmm models --root /path/to/models                 # list discovered models
-uv run lmm recommend Qwen3.6-27B-Q8_0 --root /path/to/models   # tuned llama-server config + fit-check
+lmm models --root /path/to/models                  # list discovered models
+lmm recommend Qwen3.6-27B-Q8_0 --root /path/to/models   # tuned config + fit-check
 
-# Run a model (accepts the model's name or its bare stem)
-uv run lmm serve Qwen3.6-27B-Q8_0 --root /path/to/models # start (default :8080); waits for /health + smoke test
-uv run lmm status                                        # show managed servers
-uv run lmm switch Other-Model --root /path/to/models     # stop current, start another
-uv run lmm stop --port 8080                              # stop the model server
+lmm serve Qwen3.6-27B-Q8_0 --root /path/to/models  # start (default :8080); waits for /health + smoke test
+lmm status                                         # show managed servers
+lmm switch Other-Model --root /path/to/models      # stop current, start another
+lmm stop --port 8080                               # stop the model server (not the daemon)
 
-# Connect Hermes to the running server
-uv run lmm bind Qwen3.6-27B-Q8_0 --port 8080             # point ~/.hermes/config.yaml at it
-uv run lmm bind --host other-host.local --port 8080      # bind to a model on another host (omit model to auto-detect)
-uv run lmm unbind                                        # revert from the pre-bind backup
+lmm bind Qwen3.6-27B-Q8_0 --port 8080              # point ~/.hermes/config.yaml at the running model
+lmm bind --host other-host.local --port 8080       # bind to a model on another host (omit model to auto-detect)
+lmm unbind                                          # revert from the pre-bind backup
 ```
 
-`recommend` does the RAM/KV-cache/context math from the GGUF header and your hardware, auto-enables speculative decoding when the model supports it, and validates flags against your installed `llama-server`. `bind` registers a custom provider and sets the default model, preserving your config's comments and other keys (reasoning models like Qwen3.6 want a generous `max_tokens` — `bind` prints a reminder).
-
-> **Note on `stop`:** `lmm stop` stops the **model server**, not the `lmm` daemon. To control the daemon itself, see [`lmm service`](#run-as-an-always-on-service-macos).
+`bind` registers a custom provider and sets the default model, preserving your config's comments and other keys (reasoning models like Qwen3.6 want a generous `max_tokens` — `bind` prints a reminder).
 
 ## Control daemon (HTTP API)
 
-The daemon owns server lifecycle and serves both the web UI and a token-gated API:
-
-```bash
-uv run lmm daemon --host 127.0.0.1 --port 8770   # --host 0.0.0.0 to expose on the LAN
-uv run lmm token                                  # print the bearer token (for remote/API use)
-```
-
-All endpoints require `Authorization: Bearer <token>` except `/api/health`. On loopback the web UI gets the token injected automatically; remote clients paste it once.
+The daemon serves both the web UI and a token-gated API. All endpoints require `Authorization: Bearer <token>` except `/api/health`; on loopback the UI gets the token injected, remote clients paste it once (`lmm token` prints it).
 
 | Method & path | Purpose |
 |---|---|
@@ -181,21 +226,19 @@ All endpoints require `Authorization: Bearer <token>` except `/api/health`. On l
 | `GET /api/bind-status` | whether the host's Hermes points at the running model |
 | `WS /api/stream` | live server logs + status (subprotocol `lmm.bearer.<token>`) |
 
-The daemon detects an **already-running** `llama-server` on startup (e.g. one launched manually, or that outlived a daemon restart) and reflects it in the UI. Stopping or restarting the daemon does **not** stop the model.
-
-> The control API is **pre-1.0 and evolving** — treat it as unstable.
+The daemon detects an **already-running** `llama-server` on startup and reflects it in the UI; stopping or restarting the daemon does **not** stop the model. The control API is **pre-1.0 and evolving** — treat it as unstable.
 
 ## Security
 
-The daemon runs as **your user**, so it can read your models without extra setup and **bind Hermes for you in one click**. It binds **loopback by default** (not on the network), which keeps it low-risk for personal use.
+The daemon runs as **your user** (so it can read your models and bind Hermes in one click) and binds **loopback by default**, which keeps it low-risk for personal use.
 
-If you expose it to the LAN (`--host 0.0.0.0`, to share with other machines):
+If you expose it to the LAN (`--host 0.0.0.0`):
 
 - The **control plane** (`:8770`) is gated by a **shared bearer token** — it spawns processes, so the threat model is everything *else* on the network, not your trusted clients.
 - The **inference plane** (`:8080`) is gated by `llama-server --api-key` (a secret distinct from the control token).
 - A compromise of the network-facing daemon would carry your account's privileges — a deliberate tradeoff for one-click binding and zero-setup model access.
 
-**One-click "Connect an agent" is loopback-only** — the daemon can only write the host's own `~/.hermes`. To connect an agent on a *different* machine, run `lmm bind --host <host> --port 8080 ...` on that machine (the UI shows you the exact command, pre-filled with the host you reached it through).
+**One-click "Connect an agent" is loopback-only** — the daemon can only write the host's own `~/.hermes`. To connect an agent on a *different* machine, run `lmm bind --host <host> --port 8080 …` there (the UI shows the exact command).
 
 ## Development
 

@@ -129,6 +129,13 @@ function flagsToLines(flags) {
   return lines;
 }
 
+// Friendly context label: 262144 → "256K", 1048576 → "1M".
+function fmtCtx(n) {
+  if (n % 1048576 === 0) return (n / 1048576) + "M";
+  if (n % 1024 === 0) return (n / 1024) + "K";
+  return String(n);
+}
+
 // ── Detail panel ──────────────────────────────────────────────────────
 function renderDetail() {
   if (!selected) {
@@ -160,6 +167,14 @@ function renderDetail() {
     row("License", esc(meta.license || "")) +
     row("Model card", card);
 
+  // Context dropdown: ladder values up to the model's max, default = recommended.
+  const maxCtx = meta.context_length || rec.context || 8192;
+  const ctxLadder = [262144, 131072, 65536, 32768, 16384, 8192].filter((c) => c <= maxCtx);
+  if (!ctxLadder.includes(maxCtx)) ctxLadder.push(maxCtx);
+  ctxLadder.sort((a, b) => b - a);
+  const ctxOptions = ctxLadder.map((c) =>
+    `<option value="${c}"${c === rec.context ? " selected" : ""}>${fmtCtx(c)} (${c.toLocaleString()} tokens)</option>`).join("");
+
   const runningServer = servers[0];
   const anyRunning = !!runningServer;
   const isLive = anyRunning && runningServer.model === rec.model;  // this model is the running one
@@ -186,7 +201,7 @@ function renderDetail() {
     <h1>${esc(rec.model)}</h1>
     ${metaHtml}
     <div class="section-label">Recommended launch</div>
-    <div class="detail-row"><span class="lbl">Context</span><span>${rec.context ? rec.context.toLocaleString() + " tokens" : "—"}</span></div>
+    <div class="detail-row"><span class="lbl">Context</span><span><select id="ctx-select" class="ctx-select">${ctxOptions}</select></span></div>
     <div class="detail-row"><span class="lbl">Cache type</span><span>${esc(rec.cache_type || "—")}</span></div>
     <div class="gauge-wrap">
       <div class="gauge-label">RAM fit — ${esc(fit.level || "unknown")}</div>
@@ -262,6 +277,20 @@ function wireEvents() {
   if (flagsReset) flagsReset.onclick = () => {
     const ta = document.getElementById("flags-edit");
     if (ta && selected) ta.value = flagsToLines(selected.flags || []).join(" \\\n  ");
+    const sel = document.getElementById("ctx-select");
+    if (sel && selected) sel.value = String(selected.context);
+  };
+  // Context dropdown writes the chosen -c into the flags textarea (single source
+  // of truth = the flags); Start/Switch then sends it as an override.
+  const ctxSel = root.querySelector("#ctx-select");
+  if (ctxSel) ctxSel.onchange = () => {
+    const ta = document.getElementById("flags-edit");
+    if (!ta) return;
+    const toks = ta.value.replace(/\\\s*\n/g, " ").trim().split(/\s+/).filter(Boolean);
+    const i = toks.indexOf("-c");
+    if (i >= 0 && i + 1 < toks.length) toks[i + 1] = ctxSel.value;
+    else toks.push("-c", ctxSel.value);
+    ta.value = flagsToLines(toks).join(" \\\n  ");
   };
 }
 

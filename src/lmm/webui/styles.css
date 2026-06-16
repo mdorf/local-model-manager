@@ -22,7 +22,7 @@
   --mono: "SF Mono", "Cascadia Code", "Fira Mono", ui-monospace, monospace;
   --topbar-h: 40px;
   --side-w: 220px;
-  --drawer-h: 280px;
+  --drawer-h: 220px;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -169,9 +169,14 @@ html, body {
 textarea.flags {
   display: block;
   width: 100%;
-  min-height: 230px;
+  min-height: 170px;
   resize: vertical;
   color: var(--fg);
+}
+.ctx-select {
+  font-family: var(--mono); font-size: 12px;
+  padding: 3px 6px; border: 1px solid var(--border);
+  border-radius: 4px; background: var(--bg-panel); color: var(--fg);
 }
 textarea.flags:focus { outline: none; border-color: var(--accent); }
 .flags-hint { font-size: 11px; color: var(--fg-muted); margin: -2px 0 12px; max-width: 600px; }
@@ -186,8 +191,15 @@ textarea.flags:focus { outline: none; border-color: var(--accent); }
   padding: 3px 0;
 }
 
-/* Action buttons row */
-.actions { display: flex; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
+/* Action buttons row — sticky footer so Start/Switch/Connect stay visible above
+   the log drawer regardless of how tall the detail content (metadata + flags) gets. */
+.actions {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  position: sticky; bottom: 0;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  margin: 12px -24px 0; padding: 12px 24px;
+}
 
 /* ── Buttons ────────────────────────────────────────────────────────── */
 .btn {

@@ -72,6 +72,42 @@ On the local host the daemon injects its auth token automatically, so it just lo
 
 The daemon runs in the foreground here (Ctrl-C to stop it) — ideal for trying it out. To run it always-on without a terminal, see [Run as an always-on service](#run-as-an-always-on-service-macos).
 
+## Run as an always-on service (macOS)
+
+Getting started runs the daemon in the **foreground** (Ctrl-C to stop — works on any platform). To keep it running across logout and reboot without a terminal, install it as a launchd `LaunchDaemon`: it starts at boot, restarts on crash, and **runs as you** (the user who runs `sudo lmm install`, or `--user <name>`). `sudo` is needed for the privileged steps — preview them with `--dry-run` first. (macOS only for now — a Linux/systemd installer is on the roadmap; the daemon itself is cross-platform.)
+
+```bash
+# root must be able to find uv + llama-server, hence the explicit PATH:
+sudo env "PATH=$HOME/.local/bin:/opt/homebrew/bin:$PATH" \
+  .venv/bin/lmm install --project-dir "$(pwd)" --models-dir /path/to/models
+
+sudo .venv/bin/lmm install --dry-run        # preview the exact privileged steps
+sudo .venv/bin/lmm install --reinstall      # rebuild in place (keeps token + state)
+```
+
+### Stop / start / restart the installed daemon
+
+```bash
+lmm service status        # installed? responding? (read-only, no sudo)
+sudo lmm service stop     # stop it (the plist stays, so it reloads on next boot)
+sudo lmm service start    # (re)load it
+sudo lmm service restart
+```
+
+Stopping or restarting the service leaves any running model **up** — only the control plane bounces, and it re-adopts the model on restart. (Foreground daemon? Just Ctrl-C. Note `lmm stop`, by contrast, stops the *model server*, not the daemon.)
+
+### Uninstall (remove completely)
+
+```bash
+lmm unbind                     # (optional) revert your Hermes config to its pre-bind state
+sudo .venv/bin/lmm uninstall   # remove the LaunchDaemon + shared state dir (token, venv, logs)
+rm -rf <path-to-your-clone>    # remove the cloned source + its .venv
+```
+
+`uninstall` never touches your model files — `lmm` only ever reads them — so after these steps nothing of `lmm` remains on the machine.
+
+> **Upgrading from an early `_lmm`-based build?** Run that build's `sudo lmm uninstall` (or manually `sudo dscl . -delete /Users/_lmm` and strip the models-dir ACL) *before* installing this run-as-user version — the current uninstaller no longer manages the old service account.
+
 ## How it runs (topology)
 
 `lmm` is one distributable with two roles: a **host** that manages models, and **clients** that drive it.
@@ -151,31 +187,6 @@ The daemon detects an **already-running** `llama-server` on startup (e.g. one la
 
 > The control API is **pre-1.0 and evolving** — treat it as unstable.
 
-## Run as an always-on service (macOS)
-
-The guided installer registers a launchd `LaunchDaemon` that starts at boot and restarts on crash, **running as you** (the user who runs `sudo lmm install`, or `--user <name>`). It needs `sudo` for the privileged steps — preview them with `--dry-run` first.
-
-```bash
-# root must be able to find uv + llama-server, hence the explicit PATH:
-sudo env "PATH=$HOME/.local/bin:/opt/homebrew/bin:$PATH" \
-  .venv/bin/lmm install --project-dir "$(pwd)" --models-dir /path/to/models
-
-sudo .venv/bin/lmm install --dry-run        # preview the exact privileged steps
-sudo .venv/bin/lmm install --reinstall      # rebuild in place (keeps token + state)
-```
-
-Once installed, manage the daemon's lifecycle:
-
-```bash
-lmm service status      # is it installed and responding? (read-only, no sudo)
-sudo lmm service stop    # pause it (it reloads on the next boot)
-sudo lmm service start   # (re)load it
-sudo lmm service restart
-sudo .venv/bin/lmm uninstall   # remove it entirely (daemon + state dir)
-```
-
-Stopping or restarting the service leaves any running model up; you just lose the always-on control plane until it's back.
-
 ## Security
 
 The daemon runs as **your user**, so it can read your models without extra setup and **bind Hermes for you in one click**. It binds **loopback by default** (not on the network), which keeps it low-risk for personal use.
@@ -187,8 +198,6 @@ If you expose it to the LAN (`--host 0.0.0.0`, to share with other machines):
 - A compromise of the network-facing daemon would carry your account's privileges — a deliberate tradeoff for one-click binding and zero-setup model access.
 
 **One-click "Connect an agent" is loopback-only** — the daemon can only write the host's own `~/.hermes`. To connect an agent on a *different* machine, run `lmm bind --host <host> --port 8080 ...` on that machine (the UI shows you the exact command, pre-filled with the host you reached it through).
-
-> **Upgrading from an early `_lmm`-based build?** Run that build's `sudo lmm uninstall` (or manually `sudo dscl . -delete /Users/_lmm` and strip the models-dir ACL) *before* installing this run-as-user version — the current uninstaller no longer manages the old service account.
 
 ## Development
 

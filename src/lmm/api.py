@@ -59,7 +59,8 @@ def _model_dict(m: Model) -> dict:
     return {"name": m.path.name, "path": str(m.path), "arch": m.arch,
             "family": m.family, "size_label": m.size_label, "quant": m.quant,
             "context_length": m.context_length, "has_mtp": m.has_mtp,
-            "hf_base_repo": m.hf_base_repo}
+            "hf_base_repo": m.hf_base_repo, "license": m.license,
+            "quantized_by": m.quantized_by, "has_chat_template": m.has_chat_template}
 
 
 def _instance_dict(inst: ServerInstance) -> dict:

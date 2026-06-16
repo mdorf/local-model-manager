@@ -37,6 +37,9 @@ class Model:
     hf_base_repo: str | None
     shards: list[Path] = field(default_factory=list)
     sidecars: list[Path] = field(default_factory=list)
+    license: str | None = None
+    quantized_by: str | None = None
+    has_chat_template: bool = False
 
 
 def _derive_family(basename: str, size_label: str) -> str:
@@ -65,6 +68,11 @@ def classify(info: GGUFInfo, path: str | Path, *,
     )
     block_count = md.get(f"{arch}.block_count")
     context_length = md.get(f"{arch}.context_length")
+    # HF model-card link: prefer the license link, fall back to the base-model /
+    # general repo_url that many quants carry.
+    hf_repo = (_hf_repo_from_link(str(md.get("general.license.link", "")))
+               or _hf_repo_from_link(str(md.get("general.base_model.0.repo_url", "")))
+               or _hf_repo_from_link(str(md.get("general.repo_url", ""))))
     return Model(
         path=Path(path),
         arch=arch,
@@ -75,7 +83,10 @@ def classify(info: GGUFInfo, path: str | Path, *,
         block_count=_as_int(block_count),
         context_length=_as_int(context_length),
         has_mtp=has_mtp,
-        hf_base_repo=_hf_repo_from_link(str(md.get("general.license.link", ""))),
+        hf_base_repo=hf_repo,
         shards=shards or [Path(path)],
         sidecars=sidecars or [],
+        license=(str(md["general.license"]) if md.get("general.license") else None),
+        quantized_by=(str(md["general.quantized_by"]) if md.get("general.quantized_by") else None),
+        has_chat_template=bool(md.get("tokenizer.chat_template")),
     )

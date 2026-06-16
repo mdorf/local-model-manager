@@ -52,3 +52,29 @@ def test_classify_passes_through_shards_and_sidecars(qwen_like):
     m = classify(read_gguf(qwen_like), qwen_like, shards=shards, sidecars=sidecars)
     assert m.shards == shards
     assert m.sidecars == sidecars
+
+
+def test_classify_extracts_license_quantizer_chat_template_and_card():
+    info = GGUFInfo(
+        version=3,
+        metadata={
+            "general.architecture": "qwen35",
+            "general.license": "apache-2.0",
+            "general.quantized_by": "Unsloth",
+            "general.base_model.0.repo_url": "https://huggingface.co/Qwen/Qwen3.6-27B",
+            "tokenizer.chat_template": "{{ template }}",
+        },
+        tensor_names=[],
+    )
+    m = classify(info, "/tmp/x.gguf")
+    assert m.license == "apache-2.0"
+    assert m.quantized_by == "Unsloth"
+    assert m.has_chat_template is True
+    assert m.hf_base_repo == "https://huggingface.co/Qwen/Qwen3.6-27B"  # base_model fallback
+
+
+def test_classify_optional_metadata_absent():
+    info = GGUFInfo(version=3, metadata={"general.architecture": "qwen35"}, tensor_names=[])
+    m = classify(info, "/tmp/x.gguf")
+    assert m.license is None and m.quantized_by is None
+    assert m.has_chat_template is False and m.hf_base_repo is None

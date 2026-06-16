@@ -143,6 +143,23 @@ function renderDetail() {
     ? `<div class="warnings">${rec.warnings.map(w => `<div class="warn-item">⚠ ${esc(w)}</div>`).join("")}</div>`
     : "";
 
+  // Intrinsic model metadata (from /api/models), shown above the launch recommendation.
+  const meta = models.find((x) => x.name === rec.model) || {};
+  const row = (label, html) => html ? `<div class="detail-row"><span class="lbl">${label}</span><span>${html}</span></div>` : "";
+  const quant = meta.quant ? esc(meta.quant) + (meta.quantized_by ? ` (by ${esc(meta.quantized_by)})` : "") : "";
+  const card = meta.hf_base_repo
+    ? `<a href="${esc(meta.hf_base_repo)}" target="_blank" rel="noopener">${esc(meta.hf_base_repo.replace("https://huggingface.co/", ""))} ↗</a>`
+    : "";
+  const metaHtml =
+    row("Architecture", esc(meta.arch || "")) +
+    row("Parameters", esc(meta.size_label || "")) +
+    row("Quantization", quant) +
+    row("Max context", meta.context_length ? meta.context_length.toLocaleString() + " tokens" : "") +
+    (meta.has_mtp ? row("Speculative", "draft-mtp (built-in draft head)") : "") +
+    (meta.has_chat_template ? row("Chat template", "embedded") : "") +
+    row("License", esc(meta.license || "")) +
+    row("Model card", card);
+
   const runningServer = servers[0];
   const anyRunning = !!runningServer;
   const isLive = anyRunning && runningServer.model === rec.model;  // this model is the running one
@@ -167,6 +184,8 @@ function renderDetail() {
 
   return `<div class="main">
     <h1>${esc(rec.model)}</h1>
+    ${metaHtml}
+    <div class="section-label">Recommended launch</div>
     <div class="detail-row"><span class="lbl">Context</span><span>${rec.context ? rec.context.toLocaleString() + " tokens" : "—"}</span></div>
     <div class="detail-row"><span class="lbl">Cache type</span><span>${esc(rec.cache_type || "—")}</span></div>
     <div class="gauge-wrap">

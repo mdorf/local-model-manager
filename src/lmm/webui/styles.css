@@ -127,7 +127,14 @@ html, body {
   margin-bottom: 10px;
   font-size: 13px;
 }
-.detail-row .lbl { color: var(--fg-muted); min-width: 90px; }
+.detail-row .lbl { color: var(--fg-muted); min-width: 110px; }
+.detail-row a { color: var(--accent); text-decoration: none; }
+.detail-row a:hover { text-decoration: underline; }
+.section-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--fg-muted); margin: 16px 0 8px; padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
 
 /* Fit gauge */
 .gauge-wrap { margin: 14px 0; }

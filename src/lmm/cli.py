@@ -383,15 +383,25 @@ def cmd_service(args: argparse.Namespace) -> int:
     return 0
 
 
+# v1 serves a single model on 8080; widen this when multi-model lands.
+_MODEL_PORTS = [8080]
+
+
 def cmd_daemon(args: argparse.Namespace) -> int:
     import uvicorn
 
     from lmm.api import create_app
+    from lmm.server import ServerManager, autodetect_servers
     config = load_or_create_config()
     host = args.host or config.host
     port = args.port or config.port
+    # Detect a model server that's already running (manually launched, or one
+    # that outlived a daemon restart) so the UI reflects reality on startup.
+    manager = ServerManager()
+    for inst in autodetect_servers(manager, config.roots, _MODEL_PORTS):
+        print(f"Detected running model on :{inst.port} → {Path(inst.model_path).name} (adopted)")
     print(f"Starting daemon on http://{host}:{port}  (auth token via: lmm token)")
-    uvicorn.run(create_app(config), host=host, port=port, log_level="info")
+    uvicorn.run(create_app(config, manager=manager), host=host, port=port, log_level="info")
     return 0
 
 

@@ -7,7 +7,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from lmm.health import is_healthy, smoke_test, wait_for_health
+from lmm.discovery import discover_models
+from lmm.health import is_healthy, served_model_id, smoke_test, wait_for_health
 from lmm.ports import is_port_in_use
 from lmm.process import pid_alive, spawn, stop_proc, terminate_pid
 from lmm.state import InstanceRecord, load_instances, mutate_instances, state_dir
@@ -94,16 +95,20 @@ class ServerManager:
         return self.start(command, port=port, model_path=model_path,
                           ready_timeout=ready_timeout)
 
-    def adopt(self, port: int) -> ServerInstance | None:
+    def adopt(self, port: int, model_path: str | None = None) -> ServerInstance | None:
         if any(r.port == port for r in load_instances()):
             return None                      # already managed — don't clobber
         base = f"http://127.0.0.1:{port}"
         if not is_healthy(base):
             return None
-        rec = InstanceRecord(port=port, pid=-1, model_path="(external)",
+        # Capture the real served model id (its --alias) so the UI shows the live
+        # model, not "(external)". Caller may pass a resolved file path instead.
+        if model_path is None:
+            model_path = served_model_id(base) or "(external)"
+        rec = InstanceRecord(port=port, pid=-1, model_path=model_path,
                              started_at=time.time(), external=True)
         self._upsert(rec)
-        return ServerInstance(port=port, pid=-1, model_path="(external)",
+        return ServerInstance(port=port, pid=-1, model_path=model_path,
                               started_at=rec.started_at, status="ready",
                               external=True)
 
@@ -129,3 +134,30 @@ class ServerManager:
                                       started_at=r.started_at, status=status,
                                       external=r.external))
         return out
+
+
+def autodetect_servers(manager: ServerManager, roots: list[str],
+                       ports: list[int]) -> list[ServerInstance]:
+    """Adopt any healthy llama-server on `ports` the daemon doesn't already manage.
+
+    Lets the UI reflect a model that's running but wasn't started by this daemon
+    (e.g. a manually-launched server, or one that outlived a daemon restart). The
+    served model id is resolved back to a discovered model file when possible, so
+    the UI matches it to a model in the sidebar by filename.
+    """
+    managed = {r.port for r in manager.list()}
+    discovered = None
+    adopted: list[ServerInstance] = []
+    for port in ports:
+        if port in managed:
+            continue
+        served = served_model_id(f"http://127.0.0.1:{port}")
+        if not served:
+            continue
+        if discovered is None:
+            discovered = discover_models(roots)
+        match = next((m for m in discovered if m.path.stem == served), None)
+        inst = manager.adopt(port, model_path=str(match.path) if match else served)
+        if inst is not None:
+            adopted.append(inst)
+    return adopted

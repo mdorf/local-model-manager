@@ -121,3 +121,49 @@ def test_status_marks_crashed_when_pid_gone(mgr):
     statuses = {s.port: s.status for s in fresh.status()}
     assert statuses.get(port) in ("crashed", "stopped")
     mgr.forget(port)
+
+
+# --- adopt model-id capture + auto-detect on startup ---
+
+def test_adopt_records_explicit_model_path(mgr, monkeypatch):
+    import lmm.server as s
+    monkeypatch.setattr(s, "is_healthy", lambda base, **k: True)
+    inst = mgr.adopt(48080, model_path="/models/Qwen3.6-27B-Q8_0.gguf")
+    assert inst is not None and inst.external is True
+    assert inst.model_path == "/models/Qwen3.6-27B-Q8_0.gguf"
+    assert mgr.list()[0].model_path == "/models/Qwen3.6-27B-Q8_0.gguf"
+
+
+def test_adopt_detects_served_model_id(mgr, monkeypatch):
+    import lmm.server as s
+    monkeypatch.setattr(s, "is_healthy", lambda base, **k: True)
+    monkeypatch.setattr(s, "served_model_id", lambda base, **k: "Qwen3.6-27B-Q8_0")
+    inst = mgr.adopt(48081)  # no explicit path → detects the served id
+    assert inst.model_path == "Qwen3.6-27B-Q8_0"  # not "(external)"
+
+
+def test_autodetect_adopts_and_resolves_to_file_path(mgr, monkeypatch):
+    import lmm.server as s
+
+    class _M:
+        path = Path("/Users/Shared/models/Qwen3.6-27B-Q8_0.gguf")
+
+    monkeypatch.setattr(s, "is_healthy", lambda base, **k: True)
+    # only :8080 is serving; its alias is the gguf stem
+    monkeypatch.setattr(s, "served_model_id",
+                        lambda base, **k: "Qwen3.6-27B-Q8_0" if ":8080" in base else None)
+    monkeypatch.setattr(s, "discover_models", lambda roots: [_M()])
+    adopted = s.autodetect_servers(mgr, roots=["/Users/Shared/models"], ports=[8080, 8081])
+    assert len(adopted) == 1
+    # resolved the served alias back to the real file path (sidebar matches by name)
+    assert mgr.list()[0].model_path == "/Users/Shared/models/Qwen3.6-27B-Q8_0.gguf"
+
+
+def test_autodetect_skips_already_managed_port(mgr, monkeypatch):
+    import lmm.server as s
+    monkeypatch.setattr(s, "is_healthy", lambda base, **k: True)
+    monkeypatch.setattr(s, "served_model_id", lambda base, **k: "Whatever")
+    mgr.adopt(8080, model_path="/models/Already.gguf")  # pre-existing managed record
+    adopted = s.autodetect_servers(mgr, roots=["/x"], ports=[8080])
+    assert adopted == []  # didn't clobber the managed port
+    assert mgr.list()[0].model_path == "/models/Already.gguf"

@@ -22,6 +22,19 @@ def is_healthy(base_url: str, timeout: float = 2.0) -> bool:
     return _get_status(base_url.rstrip("/") + "/health", timeout) == 200
 
 
+def served_model_id(base_url: str, timeout: float = 3.0) -> str | None:
+    """The model id (its --alias) a running OpenAI-compatible server advertises
+    via /v1/models, or None if nothing is there / it's not such a server."""
+    url = base_url.rstrip("/") + "/v1/models"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            data = json.loads(resp.read() or "{}")
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    models = data.get("data") or []
+    return models[0].get("id") if models else None
+
+
 def wait_for_health(base_url: str, timeout: float = 120.0, interval: float = 0.5) -> bool:
     """Poll /health until it returns 200 or the timeout elapses."""
     deadline = time.monotonic() + timeout

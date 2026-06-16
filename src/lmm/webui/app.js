@@ -45,6 +45,13 @@ async function refresh() {
   models = modelsResp.models;
   servers = serversResp.servers;
   await refreshBindStatus();
+  // On first load, if a model is already running, select it so its config +
+  // connect state show immediately — no extra click. The `!selected` guard
+  // means this never overrides a selection you've made.
+  if (!selected && servers[0]) {
+    try { selected = await api.recommend(servers[0].model); }
+    catch (e) { /* running model not resolvable in roots — leave unselected */ }
+  }
   paint();
 }
 

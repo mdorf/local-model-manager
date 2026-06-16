@@ -18,6 +18,17 @@ def test_unbind_restores_original(tmp_path):
     assert cfg.read_text() == _SAMPLE
 
 
+def test_unbind_removes_backup_residue(tmp_path):
+    # "complete removal": after revert, no .lmm-prev backup is left behind.
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(_SAMPLE)
+    bind(cfg, base_url="http://127.0.0.1:8080/v1", model_id="m")
+    backup = tmp_path / "config.yaml.lmm-prev"
+    assert backup.exists()
+    assert unbind(cfg) is True
+    assert not backup.exists()
+
+
 def test_unbind_without_backup_returns_false(tmp_path):
     cfg = tmp_path / "config.yaml"
     cfg.write_text(_SAMPLE)

@@ -143,6 +143,15 @@ def test_uninstall_steps_no_account_or_acl():
     assert "chmod" not in joined
 
 
+def test_uninstall_steps_remove_all_installer_artifacts():
+    # Complete removal: the log dir and firewall rule the installer created must
+    # also be torn down, not just the plist + shared dir.
+    shared = "/Users/Shared/local-model-manager"
+    joined = "\n".join(uninstall_steps(shared_dir=shared))
+    assert "rm -rf /Library/Logs/local-model-manager" in joined
+    assert f"socketfilterfw --remove {shared}/venv/bin/lmm" in joined
+
+
 def test_existing_install_artifacts_detects_present(monkeypatch, tmp_path):
     monkeypatch.setattr("os.path.exists", lambda p: False)
     assert existing_install_artifacts(shared_dir=str(tmp_path)) == []

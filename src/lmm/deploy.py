@@ -117,8 +117,15 @@ def uninstall_steps(*, shared_dir: str | None = None) -> list[str]:
     steps = [
         f"launchctl bootout system {_PLIST_PATH}",
         f"rm -f {_PLIST_PATH}",
+        # plist_steps mkdir's _LOG_DIR at install — remove it too so uninstall
+        # truly leaves nothing behind (the README promises a complete removal).
+        f"rm -rf {_LOG_DIR}",
     ]
     if shared_dir:
+        # drop the firewall rule the installer added for the shared-venv binary
+        # (harmless if it isn't present — run() uses check=False).
+        fw = "/usr/libexec/ApplicationFirewall/socketfilterfw"
+        steps.append(f"{fw} --remove {shlex.quote(shared_venv_exec(shared_dir))}")
         steps.append(f"rm -rf {shlex.quote(shared_dir)}")
     return steps
 

@@ -60,4 +60,5 @@ def unbind(config_path: str | Path) -> bool:
     if not backup.exists():
         return False
     config_path.write_text(backup.read_text())
+    backup.unlink()  # revert is complete — leave no .lmm-prev residue behind
     return True

@@ -86,6 +86,18 @@ def test_shared_venv_uses_readable_python():
     assert "--managed-python" in venv_step and "UV_PYTHON_INSTALL_DIR" in venv_step
 
 
+def test_shared_venv_isolates_uv_cache():
+    # Every uv command must pin UV_CACHE_DIR into the shared tree so the
+    # root-run install never pollutes the invoking user's ~/.cache/uv with
+    # root-owned files (which break their later unprivileged `uv` runs).
+    shared = "/Users/Shared/local-model-manager"
+    steps = shared_venv_steps(shared_dir=shared, project_dir="/proj", user="misha")
+    uv_steps = [s for s in steps if " uv " in f" {s} "]
+    assert uv_steps, "expected at least one uv command"
+    for s in uv_steps:
+        assert f"UV_CACHE_DIR={shared}/uv-cache" in s, f"uv cache not isolated in: {s}"
+
+
 def test_shared_venv_clear_flag():
     plain = "\n".join(shared_venv_steps(shared_dir="/s", project_dir="/p", user="misha"))
     assert "--clear" not in plain

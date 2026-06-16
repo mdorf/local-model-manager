@@ -55,18 +55,25 @@ def shared_venv_steps(*, shared_dir: str, project_dir: str, user: str,
     py_dir_q = shlex.quote(py_dir)
     venv = shlex.quote(f"{shared_dir}/venv")
     venv_py = shlex.quote(f"{shared_dir}/venv/bin/python")
+    # These uv commands run as root (install is sudo-gated). Pin the cache INTO
+    # the shared tree so root never writes to the invoking user's ~/.cache/uv —
+    # otherwise it leaves root-owned files there that break the user's later
+    # unprivileged `uv` runs (e.g. `uv tool install .`) with EACCES. The final
+    # chown -R hands the cache to the owning user along with the rest of the tree.
+    cache = shlex.quote(f"{shared_dir}/uv-cache")
+    uv_env = f"UV_CACHE_DIR={cache}"
     # --clear lets a reinstall replace an existing venv (uv venv errors otherwise).
     clear_flag = " --clear" if clear else ""
-    venv_cmd = (f"UV_PYTHON_INSTALL_DIR={py_dir_q} uv venv --managed-python "
+    venv_cmd = (f"{uv_env} UV_PYTHON_INSTALL_DIR={py_dir_q} uv venv --managed-python "
                 f"--python 3.11{clear_flag} {venv}")
     # Install a uv-managed Python INTO the shared tree (built as root) so the
     # interpreter the venv links to is readable after we chown the tree to the
     # owning user — avoids depending on root's/anyone-else's Python location.
     return [
         # --no-bin: don't drop a python3.11 shim into a bin dir under sudo.
-        f"UV_PYTHON_INSTALL_DIR={py_dir_q} uv python install --no-bin 3.11",
+        f"{uv_env} UV_PYTHON_INSTALL_DIR={py_dir_q} uv python install --no-bin 3.11",
         venv_cmd,
-        f"uv pip install --python {venv_py} {shlex.quote(project_dir)}",
+        f"{uv_env} uv pip install --python {venv_py} {shlex.quote(project_dir)}",
         f"chown -R {shlex.quote(user)}:staff {sd}",
     ]
 

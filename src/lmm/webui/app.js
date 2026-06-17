@@ -132,7 +132,7 @@ function flagsToLines(flags) {
 // Parse a flag list into {key, value} rows for the current-run-params table.
 // Keys are the arg names without leading dashes. Drops -m (the model file path)
 // and --alias (the model name, already in the title) — neither is a tuning knob.
-const _RUNPARAM_HIDE = new Set(["m", "alias"]);
+const _RUNPARAM_HIDE = new Set(["m", "alias", "host", "port"]);
 function flagsToKV(flags) {
   const rows = [];
   for (let i = 0; i < flags.length; i++) {
@@ -143,6 +143,13 @@ function flagsToKV(flags) {
     if (next !== null && !next.startsWith("-")) { value = next; i++; }
     const key = tok.replace(/^-+/, "");
     if (_RUNPARAM_HIDE.has(key)) continue;
+    if (key === "c") {  // context: annotate with the friendly size, e.g. 262144 (256K)
+      const n = Number(value);
+      const friendly = Number.isFinite(n) ? fmtCtx(n) : null;
+      rows.push({ key: "c (context)",
+                  value: friendly && friendly !== String(n) ? `${value} (${friendly})` : value });
+      continue;
+    }
     rows.push({ key, value });
   }
   return rows;

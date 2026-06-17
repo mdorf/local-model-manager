@@ -11,11 +11,21 @@ from lmm.models import Model
 
 _CONTEXT_LADDER = [131072, 65536, 32768, 16384, 8192]
 _DEFAULT_CACHE = "q8_0"
-# Pick the context against a tighter budget than the fit-check uses: target
-# leaving ~30% of total RAM free (vs the fit-check's ~15%), so context only
-# claims a large KV cache when there's genuine headroom. On a roomy box the
-# model's full window still fits and is kept; tighter boxes auto-step-down.
+# Budget the context's footprint (weights+KV+overhead) against the GPU working
+# set when we know it: on unified-memory Macs that's the real cliff — once
+# weights+KV exceed what the GPU can hold resident, decode slows ~2x. Stay just
+# under it (safety margin leaves room for compute scratch). When the GPU limit
+# is unknown (non-Metal/undetectable), fall back to a fraction of total RAM.
+_GPU_BUDGET_SAFETY = 0.90
 _CONTEXT_RAM_FRACTION = 0.70
+
+
+def context_budget_bytes(hardware: HardwareInfo) -> int:
+    """Memory budget for the context's footprint. Prefer the GPU working-set
+    limit (the real performance cliff on unified memory); else a RAM fraction."""
+    if hardware.gpu_working_set_bytes > 0:
+        return int(hardware.gpu_working_set_bytes * _GPU_BUDGET_SAFETY)
+    return int(hardware.total_ram_bytes * _CONTEXT_RAM_FRACTION)
 
 
 def choose_context(arch: str, metadata: dict, weights: int, model_max: int,
@@ -51,9 +61,9 @@ def recommend_config(model: Model, metadata: dict, hardware: HardwareInfo, *,
                      api_key: str | None = None) -> LaunchConfig:
     weights = weights_bytes(model.shards)
     model_max = model.context_length or 8192
-    # Select context against a tighter headroom budget; classify fit against the
-    # (more permissive) usable-RAM figure so the chosen context reads as comfortable.
-    context_budget = int(hardware.total_ram_bytes * _CONTEXT_RAM_FRACTION)
+    # Select context against the GPU working-set budget (the real cliff); classify
+    # fit against the (more permissive) usable-RAM figure so it reads as comfortable.
+    context_budget = context_budget_bytes(hardware)
     context = choose_context(model.arch, metadata, weights, model_max,
                              context_budget, cache_type)
     estimate = estimate_memory(model.arch, metadata, model.shards, context, cache_type)

@@ -1,4 +1,4 @@
-from lmm.hardware import HardwareInfo, detect_hardware
+from lmm.hardware import HardwareInfo, _metal_working_set_bytes, detect_hardware
 
 
 def test_detect_hardware_returns_plausible_values():
@@ -17,6 +17,22 @@ def test_usable_ram_scales_with_fraction():
                       perf_cores=10, platform="Darwin", has_metal=True,
                       usable_fraction=0.85)
     assert hw.usable_ram_bytes == int(64 * 1024**3 * 0.85)
+
+
+def test_metal_working_set_honors_wired_limit_override(monkeypatch):
+    total = 64 * 1024**3
+    # explicit iogpu.wired_limit_mb (e.g. raised by a power user) is respected
+    monkeypatch.setattr("lmm.hardware._sysctl_int", lambda k: 57344)  # 56 GiB in MB
+    assert _metal_working_set_bytes(total) == 57344 * 1024 * 1024
+    # 0/unset → macOS default ~75% of RAM
+    monkeypatch.setattr("lmm.hardware._sysctl_int", lambda k: 0)
+    assert _metal_working_set_bytes(total) == int(total * 0.75)
+
+
+def test_detect_hardware_sets_gpu_working_set_on_metal():
+    hw = detect_hardware()
+    if hw.has_metal:
+        assert 0 < hw.gpu_working_set_bytes <= hw.total_ram_bytes
 
 
 def test_detect_hardware_works_without_usr_sbin_on_path(monkeypatch):

@@ -1,6 +1,11 @@
 from lmm.hardware import HardwareInfo
 from lmm.models import Model
-from lmm.recommend import LaunchConfig, choose_context, recommend_config
+from lmm.recommend import (
+    LaunchConfig,
+    choose_context,
+    context_budget_bytes,
+    recommend_config,
+)
 
 _META = {
     "qwen35.block_count": 65,
@@ -27,6 +32,38 @@ def _model(tmp_path, *, has_mtp, size_bytes):
 def _hw(total_gib):
     return HardwareInfo(total_ram_bytes=total_gib * 1024**3, logical_cores=14,
                         perf_cores=10, platform="Darwin", has_metal=True)
+
+
+def test_context_budget_prefers_gpu_working_set():
+    # When the GPU working set is known, budget against it (× safety), NOT 70% RAM.
+    hw = HardwareInfo(total_ram_bytes=64 * 1024**3, logical_cores=14, perf_cores=10,
+                      platform="Darwin", has_metal=True,
+                      gpu_working_set_bytes=48 * 1024**3)
+    assert context_budget_bytes(hw) == int(48 * 1024**3 * 0.90)
+
+
+def test_context_budget_falls_back_to_ram_fraction_when_gpu_unknown():
+    # Non-Metal / undetectable (gpu_working_set_bytes=0) → 70% of total RAM.
+    hw = HardwareInfo(total_ram_bytes=64 * 1024**3, logical_cores=14, perf_cores=10,
+                      platform="Linux", has_metal=False)
+    assert context_budget_bytes(hw) == int(64 * 1024**3 * 0.70)
+
+
+def test_gpu_aware_budget_steps_context_down_below_ram_fraction():
+    # A model that fits under 70%-of-RAM (44.8 GiB) but NOT under a constrained
+    # GPU working set must step the context down — that's the cliff the tweak guards.
+    weights = 32 * 1024**3
+    big = HardwareInfo(total_ram_bytes=64 * 1024**3, logical_cores=14, perf_cores=10,
+                       platform="Darwin", has_metal=True,
+                       gpu_working_set_bytes=48 * 1024**3)
+    small = HardwareInfo(total_ram_bytes=64 * 1024**3, logical_cores=14, perf_cores=10,
+                         platform="Darwin", has_metal=True,
+                         gpu_working_set_bytes=38 * 1024**3)  # e.g. a lowered wired limit
+    ctx_big = choose_context("qwen35", _META, weights, 262144,
+                             context_budget_bytes(big), "q8_0")
+    ctx_small = choose_context("qwen35", _META, weights, 262144,
+                               context_budget_bytes(small), "q8_0")
+    assert ctx_small < ctx_big  # tighter GPU ceiling → smaller context
 
 
 def test_choose_context_picks_largest_that_fits():

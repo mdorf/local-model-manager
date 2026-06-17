@@ -45,7 +45,7 @@ On other platforms install llama.cpp any way you like (package manager or [build
 ```bash
 git clone https://github.com/mdorf/local-model-manager.git
 cd local-model-manager
-uv tool install .        # installs the `lmm` command onto your PATH
+uv tool install . --compile-bytecode     # installs the `lmm` command onto your PATH
 ```
 
 Confirm it's available — this should print the help:
@@ -55,6 +55,8 @@ lmm --help
 ```
 
 > If `lmm` isn't found, `uv`'s tool directory isn't on your `PATH`. Run `uv tool update-shell`, then open a new terminal.
+>
+> **Why `--compile-bytecode`?** It pre-compiles the `.pyc` caches now (owned by you). Without it, the first time you run a privileged `sudo lmm …` command, Python would write those caches **as root** into your tool directory — which then blocks later `uv tool install --force`. Pre-compiling avoids that. (To reinstall the command later, use `uv tool install . --force --compile-bytecode`.)
 
 **These two steps (clone + `uv tool install .`) are the shared foundation for both ways of running the daemon below.** Foreground and always-on are *alternatives* — pick one; the clone can stay where it is, the installed service builds its own copy.
 

@@ -1,6 +1,17 @@
+import os
 import sys
 
-from lmm.process import pid_alive, spawn, stop_proc, terminate_pid
+from lmm.process import pid_alive, process_argv, spawn, stop_proc, terminate_pid
+
+
+def test_process_argv_reads_own_command():
+    argv = process_argv(os.getpid())
+    assert argv and any("python" in a.lower() for a in argv)
+
+
+def test_process_argv_none_for_invalid_or_dead_pid():
+    assert process_argv(-1) is None
+    assert process_argv(999999) is None   # out of macOS pid range → no such process
 
 
 def test_spawn_runs_and_logs(tmp_path):

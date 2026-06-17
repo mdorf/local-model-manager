@@ -3,10 +3,35 @@
 from __future__ import annotations
 
 import os
+import shlex
 import signal
 import subprocess
 import time
 from pathlib import Path
+
+
+def process_argv(pid: int) -> list[str] | None:
+    """The argv of a running process, so the daemon can report what a server was
+    actually launched with — including an adopted one we didn't spawn. None if it
+    can't be read. `ps` space-joins argv; for our flag set (no spaces in paths)
+    shlex.split reconstructs it faithfully enough for display."""
+    if pid <= 0:
+        return None
+    # absolute path first: a launchd daemon's PATH may lack /bin (cf. the sysctl/lsof lessons)
+    for exe in ("/bin/ps", "ps"):
+        try:
+            out = subprocess.run([exe, "-ww", "-o", "command=", "-p", str(pid)],
+                                 capture_output=True, text=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        line = out.stdout.strip()
+        if not line:
+            return None
+        try:
+            return shlex.split(line)
+        except ValueError:
+            return line.split()
+    return None
 
 
 def spawn(command: list[str], log_path: str | Path) -> subprocess.Popen:

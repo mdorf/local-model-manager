@@ -66,10 +66,14 @@ def _model_dict(m: Model) -> dict:
 
 
 def _instance_dict(inst: ServerInstance) -> dict:
+    # the live launch flags (argv minus the binary) so the UI can show "current
+    # run params"; None when unknown (e.g. an adopted server whose pid we lost).
+    cmd = inst.command
+    flags = cmd[1:] if cmd and len(cmd) > 1 else None
     return {"port": inst.port, "pid": inst.pid, "model_path": inst.model_path,
             "model": Path(inst.model_path).name, "status": inst.status,
             "external": inst.external, "base_url": inst.base_url,
-            "started_at": inst.started_at}
+            "started_at": inst.started_at, "flags": flags}
 
 
 def _override_command(flags: list[str]) -> tuple[list[str], str]:

@@ -1,8 +1,20 @@
 from fastapi.testclient import TestClient
 
-from lmm.api import create_app
+from lmm.api import _instance_dict, create_app
 from lmm.daemonconfig import DaemonConfig
+from lmm.server import ServerInstance
 from tests.conftest import write_minimal_gguf
+
+
+def test_instance_dict_exposes_launch_flags():
+    inst = ServerInstance(port=8080, pid=1, model_path="/m/x.gguf", started_at=0.0,
+                          status="ready",
+                          command=["llama-server", "-m", "/m/x.gguf", "-c", "8192"])
+    assert _instance_dict(inst)["flags"] == ["-m", "/m/x.gguf", "-c", "8192"]
+    # unknown command (e.g. adopted server, pid lost) → flags is None
+    bare = ServerInstance(port=8080, pid=1, model_path="/m/x.gguf", started_at=0.0,
+                          status="ready")
+    assert _instance_dict(bare)["flags"] is None
 
 _META = {
     "general.architecture": "qwen35", "general.name": "Qwen3.6-27B",

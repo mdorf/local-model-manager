@@ -37,6 +37,7 @@ class InstanceRecord:
     model_path: str
     started_at: float
     external: bool = False
+    command: list[str] | None = None   # the launch argv (for "current run params"); None for old records
 
 
 def load_instances() -> list[InstanceRecord]:

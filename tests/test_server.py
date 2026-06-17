@@ -32,6 +32,19 @@ def test_start_reaches_ready_and_persists(mgr):
         mgr.stop(port)
 
 
+def test_start_records_launch_command(mgr):
+    # the launch argv is stored (record + instance) so the UI can show "current run params"
+    port = pick_free_port(start=49900)
+    cmd = _fake_cmd(port)
+    inst = mgr.start(cmd, port=port, model_path="/m/x.gguf", ready_timeout=10.0)
+    try:
+        assert inst.command == cmd
+        rec = next(r for r in mgr.list() if r.port == port)
+        assert rec.command == cmd
+    finally:
+        mgr.stop(port)
+
+
 def test_stop_removes_instance(mgr):
     port = pick_free_port(start=49720)
     mgr.start(_fake_cmd(port), port=port, model_path="/m/x.gguf", ready_timeout=10.0)

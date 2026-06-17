@@ -10,7 +10,7 @@ from pathlib import Path
 from lmm.discovery import discover_models
 from lmm.health import is_healthy, served_model_id, smoke_test, wait_for_health
 from lmm.ports import is_port_in_use, listening_pid
-from lmm.process import pid_alive, spawn, stop_proc, terminate_pid
+from lmm.process import pid_alive, process_argv, spawn, stop_proc, terminate_pid
 from lmm.state import InstanceRecord, load_instances, mutate_instances, state_dir
 
 
@@ -31,6 +31,7 @@ class ServerInstance:
     started_at: float
     status: str               # starting|ready|unhealthy|running|crashed|stopped
     external: bool = False
+    command: list[str] | None = None   # the launch argv (for "current run params")
 
     @property
     def base_url(self) -> str:
@@ -65,8 +66,8 @@ class ServerManager:
         proc = spawn(command, log_path)
         self._procs[port] = proc
         started_at = time.time()
-        self._upsert(InstanceRecord(port=port, pid=proc.pid,
-                                    model_path=model_path, started_at=started_at))
+        self._upsert(InstanceRecord(port=port, pid=proc.pid, model_path=model_path,
+                                    started_at=started_at, command=list(command)))
         base = f"http://127.0.0.1:{port}"
         api_key = _api_key_from_command(command)
         if wait_for_health(base, timeout=ready_timeout):
@@ -74,7 +75,8 @@ class ServerManager:
         else:
             status = "unhealthy"
         return ServerInstance(port=port, pid=proc.pid, model_path=model_path,
-                              started_at=started_at, status=status)
+                              started_at=started_at, status=status,
+                              command=list(command))
 
     def stop(self, port: int, timeout: float = 10.0) -> bool:
         rec = next((r for r in load_instances() if r.port == port), None)
@@ -115,12 +117,15 @@ class ServerManager:
         # Capture the real listening pid so an explicit stop/switch can terminate
         # this server (falls back to -1 = "known to be running, pid unknown").
         pid = listening_pid(port) or -1
+        # read what it's actually running with so the UI can show "current run
+        # params" for a server we didn't spawn (None if the pid is unknown).
+        command = process_argv(pid)
         rec = InstanceRecord(port=port, pid=pid, model_path=model_path,
-                             started_at=time.time(), external=True)
+                             started_at=time.time(), external=True, command=command)
         self._upsert(rec)
         return ServerInstance(port=port, pid=pid, model_path=model_path,
                               started_at=rec.started_at, status="ready",
-                              external=True)
+                              external=True, command=command)
 
     def status(self) -> list[ServerInstance]:
         out: list[ServerInstance] = []
@@ -142,7 +147,7 @@ class ServerManager:
             out.append(ServerInstance(port=r.port, pid=r.pid,
                                       model_path=r.model_path,
                                       started_at=r.started_at, status=status,
-                                      external=r.external))
+                                      external=r.external, command=r.command))
         return out
 
 

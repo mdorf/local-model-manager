@@ -139,6 +139,15 @@ html, body {
   font-size: 13px;
 }
 .detail-row .lbl { color: var(--fg-muted); min-width: 110px; }
+
+/* Metadata + current-run-params side by side; wraps the run-params column below
+   on narrow windows (flex-wrap + a flex-basis floor). */
+.detail-cols { display: flex; flex-wrap: wrap; gap: 4px 48px; }
+.detail-cols > .col { flex: 1 1 320px; min-width: 0; }
+.col-head {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--fg-muted); margin-bottom: 8px;
+}
 .detail-row a { color: var(--accent); text-decoration: none; }
 .detail-row a:hover { text-decoration: underline; }
 .section-label {

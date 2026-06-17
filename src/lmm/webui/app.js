@@ -129,6 +129,25 @@ function flagsToLines(flags) {
   return lines;
 }
 
+// Parse a flag list into {key, value} rows for the current-run-params table.
+// Keys are the arg names without leading dashes. Drops -m (the model file path)
+// and --alias (the model name, already in the title) — neither is a tuning knob.
+const _RUNPARAM_HIDE = new Set(["m", "alias"]);
+function flagsToKV(flags) {
+  const rows = [];
+  for (let i = 0; i < flags.length; i++) {
+    const tok = String(flags[i]);
+    if (!tok.startsWith("-")) continue;        // stray value (already consumed)
+    const next = i + 1 < flags.length ? String(flags[i + 1]) : null;
+    let value = "";
+    if (next !== null && !next.startsWith("-")) { value = next; i++; }
+    const key = tok.replace(/^-+/, "");
+    if (_RUNPARAM_HIDE.has(key)) continue;
+    rows.push({ key, value });
+  }
+  return rows;
+}
+
 // Friendly context label: 262144 → "256K", 1048576 → "1M".
 function fmtCtx(n) {
   if (n % 1048576 === 0) return (n / 1048576) + "M";
@@ -182,6 +201,16 @@ function renderDetail() {
   const anyRunning = !!runningServer;
   const isLive = anyRunning && runningServer.model === rec.model;  // this model is the running one
   const isBound = isLive && bound.bound;  // bound ⇒ Hermes points at the running model (#2)
+  // What the running server was ACTUALLY launched with (read-only; covers adopted
+  // servers too). Shown only for the live model, distinct from the editable
+  // "Recommended launch" flags above.
+  const liveKV = isLive && Array.isArray(runningServer.flags) ? flagsToKV(runningServer.flags) : [];
+  const currentParamsHtml = liveKV.length
+    ? `<div class="col">
+         <div class="col-head">Current run params</div>
+         ${liveKV.map((r) => `<div class="detail-row"><span class="lbl">${esc(r.key)}</span><span>${esc(r.value || "✓")}</span></div>`).join("")}
+       </div>`
+    : "";
 
   let actionsHtml;
   if (isLive) {
@@ -190,7 +219,8 @@ function renderDetail() {
     const connectTitle = isBound
       ? "Hermes is pointed at this model — click to re-bind"
       : "Bind Hermes (or any OpenAI-compatible app) to this running model";
-    actionsHtml = `<button id="btn-connect" class="btn" title="${esc(connectTitle)}">${connectLabel}</button>`;
+    actionsHtml = `<button id="btn-connect" class="btn" title="${esc(connectTitle)}">${connectLabel}</button>
+       <button id="btn-reload" class="btn ghost" title="Restart this model with the launch config above (applies any edited flags / context)">Reload</button>`;
   } else {
     // Not running: must start/switch to it first; connecting is disabled until then.
     const startLabel = anyRunning ? "Switch" : "Start";
@@ -202,7 +232,10 @@ function renderDetail() {
 
   return `<div class="main">
     <h1>${esc(rec.model)}</h1>
-    ${metaHtml}
+    <div class="detail-cols">
+      <div class="col">${metaHtml}</div>
+      ${currentParamsHtml}
+    </div>
     <div class="section-label">Recommended launch</div>
     <div class="detail-row"><span class="lbl">Context</span><span><select id="ctx-select" class="ctx-select">${ctxOptions}</select></span></div>
     <div class="detail-row"><span class="lbl">Cache type</span><span>${esc(rec.cache_type || "—")}</span></div>
@@ -274,9 +307,12 @@ function wireEvents() {
   // Connect-an-agent button (detail pane, enabled only for the running model)
   const connectBtn = root.querySelector("#btn-connect");
   if (connectBtn) connectBtn.onclick = showConnect;
-  // Start/Switch button
+  // Start/Switch button (and Reload, which is the same path: switch the running
+  // server to the edited launch config)
   const startBtn = root.querySelector("#btn-start");
   if (startBtn) startBtn.onclick = doStart;
+  const reloadBtn = root.querySelector("#btn-reload");
+  if (reloadBtn) reloadBtn.onclick = doStart;
   // Reset edited flags back to the recommended config
   const flagsReset = root.querySelector("#flags-reset");
   if (flagsReset) flagsReset.onclick = () => {
@@ -333,6 +369,7 @@ async function doStart() {
 
   const port = (servers[0] && servers[0].port) || 8080;
   const isRunning = servers.length > 0;
+  const isReload = isRunning && servers[0].model === selected.model;  // restart the live model
   const override = readFlagOverride();  // null unless the user edited the flags
 
   // Reset the log pane so it shows the incoming model's logs, not the previous
@@ -340,7 +377,8 @@ async function doStart() {
   clearLogs();
   // Loading a model is slow (the daemon waits for /health + a smoke test before
   // returning). Show progress and lock the controls; live logs stream below.
-  setBusy(isRunning ? `Switching to ${selected.model}…` : `Starting ${selected.model}…`);
+  setBusy(isReload ? `Reloading ${selected.model}…`
+          : isRunning ? `Switching to ${selected.model}…` : `Starting ${selected.model}…`);
   try {
     if (isRunning) {
       await api.switch(selected.model, port, override);

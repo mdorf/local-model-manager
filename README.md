@@ -114,6 +114,20 @@ sudo "$(command -v lmm)" service restart
 
 **To stop the daemon:** `sudo "$(command -v lmm)" service stop`. Stopping or restarting the service leaves any running **model up** — only the control plane bounces, and it re-adopts the model on restart. To stop the *model* itself, use the UI **Stop** button or `lmm stop`.
 
+### Access it from another machine on your LAN
+
+By default the daemon binds **loopback** (`127.0.0.1`), so it's reachable only on the host itself — the safe default. To drive it from another machine on your network (a laptop, say), reinstall with `--host 0.0.0.0`:
+
+```bash
+sudo "$(command -v lmm)" install --reinstall --host 0.0.0.0 \
+  --project-dir "$(pwd)" --models-dir /path/to/models
+lmm token     # prints the bearer token to paste on the client
+```
+
+Then on the other machine open `http://<host-ip>:8770` (e.g. `http://192.168.1.78:8770`) and paste the token once. (If macOS prompts to allow incoming connections, allow it.)
+
+> ⚠️ **Only do this on a network you trust.** The control plane is token-gated and inference gets an `--api-key` automatically when LAN-exposed — but the daemon runs as **you** and spawns processes, so a compromise of the network-facing daemon carries your account's privileges. Keep it on a LAN you control; never port-forward it to the internet. See [Security](#security).
+
 ---
 
 ## Using the web UI

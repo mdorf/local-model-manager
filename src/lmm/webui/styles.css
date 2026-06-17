@@ -57,8 +57,18 @@ html, body {
 /* ── Body layout ────────────────────────────────────────────────────── */
 .layout {
   display: flex;
-  height: calc(100vh - var(--topbar-h) - var(--drawer-h));
+  height: calc(100vh - var(--topbar-h));
   margin-top: var(--topbar-h);
+}
+
+/* Right side stacks as a column: scrollable detail → action bar → log drawer.
+   Keeps the drawer directly below the buttons at any window height (no
+   bottom-pinned gap), and keeps the action bar from overlapping the content. */
+.content-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 /* ── Sidebar ────────────────────────────────────────────────────────── */
@@ -108,7 +118,8 @@ html, body {
 
 /* ── Main detail panel ──────────────────────────────────────────────── */
 .main {
-  flex: 1;
+  flex: 0 1 auto;       /* size to content; shrink + scroll when it gets tall */
+  min-height: 0;
   overflow-y: auto;
   padding: 20px 24px;
   background: var(--bg-panel);
@@ -191,14 +202,15 @@ textarea.flags:focus { outline: none; border-color: var(--accent); }
   padding: 3px 0;
 }
 
-/* Action buttons row — sticky footer so Start/Switch/Connect stay visible above
-   the log drawer regardless of how tall the detail content (metadata + flags) gets. */
+/* Action buttons row — its own always-visible band between the scrollable
+   detail and the log drawer (a flex-column sibling, so it never overlaps the
+   detail content the way the old sticky footer did). */
 .actions {
+  flex: 0 0 auto;
   display: flex; gap: 8px; flex-wrap: wrap;
-  position: sticky; bottom: 0;
   background: var(--bg-panel);
   border-top: 1px solid var(--border);
-  margin: 12px -24px 0; padding: 12px 24px;
+  padding: 12px 24px;
 }
 
 /* ── Buttons ────────────────────────────────────────────────────────── */
@@ -310,14 +322,12 @@ textarea.flags:focus { outline: none; border-color: var(--accent); }
 
 /* ── Log drawer ─────────────────────────────────────────────────────── */
 .drawer {
-  position: fixed;
-  bottom: 0; left: 0; right: 0;
-  height: var(--drawer-h);
+  flex: 1 1 0;          /* fill the column remainder — log starts right below the buttons */
+  min-height: 140px;
   background: var(--drawer-bg);
   border-top: 1px solid #333;
   display: flex;
   flex-direction: column;
-  z-index: 50;
 }
 .drawer-header {
   display: flex;
@@ -348,7 +358,7 @@ textarea.flags:focus { outline: none; border-color: var(--accent); }
 
 /* Reconnecting indicator */
 .reconnecting-banner {
-  position: absolute;
+  position: fixed;
   bottom: calc(var(--drawer-h) + 4px);
   right: 12px;
   background: #78350f;

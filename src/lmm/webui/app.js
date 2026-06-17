@@ -215,8 +215,8 @@ function renderDetail() {
     ${flagsText ? `<div class="detail-row"><span class="lbl">Flags</span></div>
       <textarea class="flags" id="flags-edit" spellcheck="false">${esc(flagsText)}</textarea>
       <div class="flags-hint">Editable — changes apply to the next Start/Switch (the RAM fit-check won't re-run). <a id="flags-reset">Reset to recommended</a></div>` : ""}
-    <div class="actions">${actionsHtml}</div>
-  </div>`;
+  </div>
+  <div class="actions">${actionsHtml}</div>`;
 }
 
 // ── Log drawer ────────────────────────────────────────────────────────
@@ -241,9 +241,11 @@ function paint() {
     renderTopbar() +
     `<div class="layout">` +
     renderSidebar() +
+    `<div class="content-col">` +
     renderDetail() +
+    renderDrawer() +
     `</div>` +
-    renderDrawer();
+    `</div>`;
   wireEvents();
   scrollLogsToBottom();  // a full repaint re-renders the log view — keep it tailed
 }

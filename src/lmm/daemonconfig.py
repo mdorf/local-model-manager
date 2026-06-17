@@ -49,3 +49,13 @@ def load_or_create_config() -> DaemonConfig:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(asdict(cfg), indent=2))
     return cfg
+
+
+def rotate_token() -> str:
+    """Generate a fresh control token, persist it (preserving host/port/
+    inference_key/roots), and return it. The running daemon keeps the old token
+    in memory until restarted, and every client must re-enter the new one."""
+    cfg = load_or_create_config()
+    cfg.token = secrets.token_hex(24)
+    _config_file().write_text(json.dumps(asdict(cfg), indent=2))
+    return cfg.token

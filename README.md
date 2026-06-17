@@ -225,7 +225,7 @@ lmm unbind                                          # revert from the pre-bind b
 
 ## Control daemon (HTTP API)
 
-The daemon serves both the web UI and a token-gated API. All endpoints require `Authorization: Bearer <token>` except `/api/health`; on loopback the UI gets the token injected, remote clients paste it once (`lmm token` prints it).
+The daemon serves both the web UI and a token-gated API. All endpoints require `Authorization: Bearer <token>` except `/api/health`; on loopback the UI gets the token injected, remote clients paste it once (`lmm token` prints it). The token doesn't expire; if it ever leaks, rotate it with `lmm token --rotate` (then restart the daemon and re-enter it on each client).
 
 | Method & path | Purpose |
 |---|---|

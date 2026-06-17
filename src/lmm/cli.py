@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 from lmm import daemon_client, deploy
-from lmm.daemonconfig import load_or_create_config
+from lmm.daemonconfig import load_or_create_config, rotate_token
 from lmm.discovery import discover_models
 from lmm.gguf import read_gguf
 from lmm.hardware import detect_hardware
@@ -176,6 +176,12 @@ def cmd_switch(args: argparse.Namespace) -> int:
 
 
 def cmd_token(args: argparse.Namespace) -> int:
+    if getattr(args, "rotate", False):
+        print(rotate_token())
+        print("Token rotated. Restart the daemon for it to take effect "
+              "(sudo \"$(command -v lmm)\" service restart), then re-enter the new "
+              "token on every client.", file=sys.stderr)
+        return 0
     print(load_or_create_config().token)
     return 0
 
@@ -472,6 +478,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_daemon.set_defaults(func=cmd_daemon)
 
     p_token = sub.add_parser("token", help="print the daemon auth token")
+    p_token.add_argument("--rotate", action="store_true",
+                         help="generate a new token (requires a daemon restart + client re-entry)")
     p_token.set_defaults(func=cmd_token)
 
     p_bind = sub.add_parser("bind", help="point a Hermes config at a local server")

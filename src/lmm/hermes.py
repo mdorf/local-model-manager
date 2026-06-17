@@ -53,12 +53,49 @@ def bind(config_path: str | Path, *, base_url: str, model_id: str,
 
 
 def unbind(config_path: str | Path) -> bool:
-    """Restore the config from the <config>.lmm-prev backup. Returns False if
-    no backup exists (nothing to revert)."""
+    """Reverse a bind, preserving any *unrelated* edits made since. Restores only
+    the keys bind changes — model.provider/default/base_url and the provider entry
+    it added — to their pre-bind values (read from <config>.lmm-prev); every other
+    key in the current config is left untouched. A wholesale restore would discard
+    edits made after binding. Returns False if no backup exists (nothing to revert).
+    """
     config_path = Path(config_path)
     backup = Path(str(config_path) + _BACKUP_SUFFIX)
     if not backup.exists():
         return False
-    config_path.write_text(backup.read_text())
+
+    yaml = _yaml()
+    current = yaml.load(config_path.read_text()) or {}
+    prev = yaml.load(backup.read_text()) or {}
+    prev_model = prev.get("model") if isinstance(prev.get("model"), dict) else {}
+    prev_providers = prev.get("providers") if isinstance(prev.get("providers"), dict) else {}
+
+    model = current.get("model")
+    if isinstance(model, dict):
+        # the provider bind registered (model.provider == "custom:<name>"); fall
+        # back to bind's default name if it's been changed away from custom:*.
+        ref = model.get("provider")
+        name = (ref.split(":", 1)[1]
+                if isinstance(ref, str) and ref.startswith("custom:") else "local")
+        for key in ("provider", "default", "base_url"):
+            if key in prev_model:
+                model[key] = prev_model[key]
+            else:
+                model.pop(key, None)
+        if not model and "model" not in prev:
+            current.pop("model", None)
+
+        providers = current.get("providers")
+        if isinstance(providers, dict):
+            if name in prev_providers:
+                providers[name] = prev_providers[name]  # restore a pre-existing entry
+            else:
+                providers.pop(name, None)               # drop the one bind added
+            if not providers and "providers" not in prev:
+                current.pop("providers", None)
+
+    buf = io.StringIO()
+    yaml.dump(current, buf)
+    config_path.write_text(buf.getvalue())
     backup.unlink()  # revert is complete — leave no .lmm-prev residue behind
     return True

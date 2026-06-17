@@ -1,3 +1,5 @@
+from ruamel.yaml import YAML
+
 from lmm.hermes import bind, unbind
 
 _SAMPLE = """\
@@ -7,6 +9,33 @@ model:
   base_url: https://openrouter.ai/api/v1
 providers: {}
 """
+
+
+def _load(path):
+    return YAML().load(path.read_text())
+
+
+def test_unbind_preserves_unrelated_edits_made_after_bind(tmp_path):
+    # The clobber risk: bind → user edits config for unrelated reasons → unbind.
+    # A wholesale restore would discard those edits; surgical unbind must keep them.
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(_SAMPLE)
+    bind(cfg, base_url="http://127.0.0.1:8080/v1", model_id="m")
+    # user adds an unrelated top-level key AND their own provider after binding
+    cfg.write_text(cfg.read_text() + "\nlogging:\n  level: debug\n")
+    d = _load(cfg)
+    d["providers"]["openrouter"] = {"base_url": "https://openrouter.ai/api/v1"}
+    YAML().dump(d, cfg.open("w"))
+
+    assert unbind(cfg) is True
+    out = _load(cfg)
+    # unrelated edits survive:
+    assert out["logging"]["level"] == "debug"
+    assert "openrouter" in out["providers"]
+    # the bind itself is reverted:
+    assert out["model"]["provider"] == "openrouter"
+    assert out["model"]["default"] == "moonshotai/kimi-k2.6"
+    assert "local" not in out["providers"]
 
 
 def test_unbind_restores_original(tmp_path):

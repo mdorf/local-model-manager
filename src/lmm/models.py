@@ -43,6 +43,11 @@ class Model:
     has_chat_template: bool = False
     author: str | None = None
 
+    def matches(self, query: str) -> bool:
+        """True if `query` names this model — by filename, full path, or stem
+        (the stem is the served --alias, e.g. `Qwen3.6-27B-Q8_0`)."""
+        return query in (self.path.name, str(self.path), self.path.stem)
+
 
 def _derive_family(basename: str, size_label: str) -> str:
     fam = basename.strip()

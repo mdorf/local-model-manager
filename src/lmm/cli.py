@@ -37,8 +37,7 @@ def cmd_models(args: argparse.Namespace) -> int:
 
 
 def cmd_recommend(args: argparse.Namespace) -> int:
-    matches = [m for m in discover_models(args.root)
-               if m.path.name == args.model or str(m.path) == args.model]
+    matches = [m for m in discover_models(args.root) if m.matches(args.model)]
     if not matches:
         print(f"Model not found: {args.model}")
         return 1
@@ -59,7 +58,7 @@ def cmd_recommend(args: argparse.Namespace) -> int:
 
 def _find_model(root, name):
     for m in discover_models(root):
-        if m.path.name == name or str(m.path) == name:
+        if m.matches(name):
             return m
     return None
 

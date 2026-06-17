@@ -1,7 +1,21 @@
 from pathlib import Path
 
 from lmm.gguf import GGUFInfo, read_gguf
-from lmm.models import classify, quant_from_file_type
+from lmm.models import Model, classify, quant_from_file_type
+
+
+def _mk(path):
+    return Model(path=Path(path), arch="qwen35", name="Qwen3.6-27B", family="qwen3.6",
+                 size_label="27B", quant="Q8_0", block_count=65, context_length=262144,
+                 has_mtp=True, hf_base_repo=None)
+
+
+def test_model_matches_filename_path_and_stem():
+    m = _mk("/Users/Shared/models/Qwen3.6-27B-Q8_0.gguf")
+    assert m.matches("Qwen3.6-27B-Q8_0.gguf")                          # filename
+    assert m.matches("/Users/Shared/models/Qwen3.6-27B-Q8_0.gguf")     # full path
+    assert m.matches("Qwen3.6-27B-Q8_0")                               # bare stem (README form)
+    assert not m.matches("Qwen3.6-27B-Other")
 
 
 def test_quant_mapping():

@@ -26,11 +26,16 @@ def _app(manager, host="127.0.0.1"):
     return create_app(cfg, manager=manager, command_builder=lambda *a: None)
 
 
-def test_bind_remote_is_forbidden():
-    # default TestClient client host is "testclient" → non-loopback → 403
-    app = _app(FakeManager([_running()]))
-    r = TestClient(app).post("/api/bind", json={}, headers=H)
-    assert r.status_code == 403
+def test_bind_remote_is_allowed(tmp_path):
+    # bind is token-gated, NOT loopback-only: a LAN client (default TestClient host
+    # is "testclient" → non-loopback) can bind the SERVER's Hermes (it configures
+    # the server host, not the caller). Target a temp config, never real ~/.hermes.
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(_SAMPLE)
+    app = _app(FakeManager([_running()]), host="0.0.0.0")
+    r = TestClient(app).post("/api/bind", json={"hermes_config": str(cfg_file)}, headers=H)
+    assert r.status_code == 200
+    assert "custom:local" in cfg_file.read_text()
 
 
 def test_bind_loopback_writes_running_model(tmp_path):
@@ -97,6 +102,11 @@ def test_bind_status_false_when_model_differs(tmp_path, monkeypatch):
     assert b["bound"] is False and b["model_id"] is None
 
 
-def test_bind_status_remote_false():
+def test_bind_status_works_over_lan():
+    # bind-status is no longer loopback-gated; a LAN client gets the real status
+    # (same code path as loopback), so the badge works over the LAN too.
     app = _app(FakeManager([_running()]))
-    assert TestClient(app).get("/api/bind-status", headers=H).json()["bound"] is False
+    remote = TestClient(app).get("/api/bind-status", headers=H).json()
+    loop = TestClient(app, client=("127.0.0.1", 1)).get("/api/bind-status", headers=H).json()
+    assert remote == loop
+    assert "model_id" in remote  # full shape (the old remote path returned only {bound})

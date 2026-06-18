@@ -215,14 +215,12 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
                 "model_id": model_id}
 
     @app.post("/api/bind", dependencies=[Depends(auth)])
-    def bind_hermes(body: BindRequest, request: Request):
-        # Loopback-only: the daemon (running as the owning user) can write that
-        # user's local ~/.hermes. It cannot write a remote client's machine, so
-        # remote callers use the `lmm bind` command instead.
-        client = request.client.host if request.client else None
-        if client not in _LOOPBACK_HOSTS:
-            raise HTTPException(status_code=403,
-                                detail="bind is only available to the local host operator")
+    def bind_hermes(body: BindRequest):
+        # Binds the SERVER HOST's ~/.hermes (the daemon runs as the owning user) to
+        # the running model at 127.0.0.1. Token-gated; usable over the LAN so the
+        # operator can bind the server's Hermes from another machine (it configures
+        # the SERVER, not the caller — a remote caller's own machine is bound via
+        # the `lmm bind` command instead).
         running = app.state.manager.status()
         inst = running[0] if running else None
         if inst is None:
@@ -241,18 +239,14 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
 
     @app.get("/api/hermes-profiles", dependencies=[Depends(auth)])
     def hermes_profiles():
-        # Token-gated but NOT loopback-only: a LAN client needs the profile names
-        # to set --profile on the `lmm bind` command it runs on its own machine.
-        # (Binding itself stays loopback-only — see POST /api/bind.) Only names +
-        # paths are returned, no config contents.
+        # Token-gated; lists the SERVER host's Hermes profiles (names + paths only,
+        # no config contents) for both the in-app bind and the remote command.
         return {"profiles": hermes_list_profiles()}
 
     @app.get("/api/bind-status", dependencies=[Depends(auth)])
-    def bind_status(request: Request):
-        # Is the host operator's Hermes currently pointed at the running server?
-        client = request.client.host if request.client else None
-        if client not in _LOOPBACK_HOSTS:
-            return {"bound": False}
+    def bind_status():
+        # Is the server host's Hermes (active config) pointed at the running model?
+        # Token-gated; readable over the LAN so the badge works there too.
         running = app.state.manager.list()  # records: no health probe (fast)
         inst = running[0] if running else None
         cfg_path = Path.home() / ".hermes" / "config.yaml"

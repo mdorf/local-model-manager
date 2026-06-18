@@ -576,22 +576,15 @@ async function showConnect() {
   const profileSelect = profiles.length
     ? `<select id="bind-profile" class="ctx-select" style="min-width:130px">${profileOptions}</select>`
     : "";
-  // One-click in-app bind is loopback-only (the daemon can only write the host
-  // operator's ~/.hermes). Show it only when viewing from the host itself; over
-  // the LAN the picker moves down to the command (which runs on the remote box).
-  const hostIsLoopback = ["127.0.0.1", "localhost", "::1", "[::1]"].includes(location.hostname);
-  const hostBindHtml = hostIsLoopback
-    ? `<p class="modal-sub">On <b>this host</b>, bind a Hermes profile to this model:</p>
-       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-         ${profiles.length ? `<label class="modal-sub" style="margin:0">Profile</label>${profileSelect}` : ""}
-         <button class="btn" id="btn-bind-now">Bind</button>
-       </div>`
-    : "";
-  const cmdProfileHtml = (!hostIsLoopback && profiles.length)
-    ? `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:6px 0">
-         <label class="modal-sub" style="margin:0">Profile</label>${profileSelect}
-       </div>`
-    : "";
+  // In-app bind writes the SERVER host's ~/.hermes (the daemon runs there), so
+  // it's shown everywhere — over the LAN it configures the server, which is what
+  // you want when your Hermes runs on the server. The one picker drives both this
+  // and the remote command.
+  const hostBindHtml =
+    `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+       ${profiles.length ? `<label class="modal-sub" style="margin:0">Profile</label>${profileSelect}` : ""}
+       <button class="btn" id="btn-bind-now">Bind</button>
+     </div>`;
   const keyId = "conn-key-input";
   const hasKey = !!info.inference_key;
   const keyFieldHtml = hasKey
@@ -614,11 +607,12 @@ async function showConnect() {
 
       <div class="connect-section">
         <h4>Using Hermes</h4>
+        <p class="modal-sub">Pick a profile, then bind it on the <b>server</b>
+          (this daemon's host) to the running model:</p>
         ${hostBindHtml}
-        <p class="modal-sub" style="margin-top:10px">On another machine, run this once
-          (a profile of that name must exist there; updates that machine's
-          <code>~/.hermes/config.yaml</code>):</p>
-        ${cmdProfileHtml}
+        <p class="modal-sub" style="margin-top:10px">Or, to bind a <b>different</b>
+          machine's Hermes, run this once on that machine
+          (a profile of that name must exist there):</p>
         <code class="block" id="conn-cmd">${esc(bindCmd)}</code>
         <button class="btn ghost" id="btn-copy-cmd">Copy command</button>
       </div>
@@ -673,7 +667,6 @@ async function showConnect() {
     const sel = overlay.querySelector("#bind-profile");
     const cfgPath = sel ? sel.value : null;
     const profName = sel ? sel.options[sel.selectedIndex].text : "Hermes";
-    const idle = profiles.length ? "Bind" : "Bind Hermes on this host";
     bindNowBtn.disabled = true;
     bindNowBtn.textContent = "Binding…";
     try {
@@ -681,15 +674,11 @@ async function showConnect() {
       bindNowBtn.textContent = `✓ Bound ${profName}`;
       await refreshBindStatus();
       paint();  // refresh the "✓ Hermes bound" badge (modal lives on <body>, survives)
-      setTimeout(() => { bindNowBtn.disabled = false; bindNowBtn.textContent = idle; }, 1800);
+      setTimeout(() => { bindNowBtn.disabled = false; bindNowBtn.textContent = "Bind"; }, 1800);
     } catch (e) {
       bindNowBtn.disabled = false;
-      if (e && e.code === 403) {
-        bindNowBtn.textContent = "Host only — use the command ↓";
-      } else {
-        bindNowBtn.textContent = idle;
-        showBanner(e && e.message ? "Bind failed: " + e.message : "Bind failed");
-      }
+      bindNowBtn.textContent = "Bind";
+      showBanner(e && e.message ? "Bind failed: " + e.message : "Bind failed");
     }
   };
 }

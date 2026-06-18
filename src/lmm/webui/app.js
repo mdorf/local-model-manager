@@ -75,9 +75,9 @@ function renderTopbar() {
       <span class="status-label">running:</span>
       <span class="status-value">${esc(running.model)} :${running.port}</span>
       ${boundBadge}
-      <a class="btn ghost" href="${esc(openUrl)}" target="_blank" rel="noopener"
+      <button class="btn ghost" id="btn-open-server" data-url="${esc(openUrl)}"
          title="Open the model server's built-in page (${esc(openUrl)})"
-         style="padding:4px 10px;font-size:12px;text-decoration:none">Open server ↗</a>
+         style="padding:4px 10px;font-size:12px">Open server ↗</button>
       <button class="btn danger" id="btn-stop" style="padding:4px 10px;font-size:12px">Stop</button>`;
   } else {
     statusHtml = `<span class="status-label">no server running</span>`;
@@ -303,14 +303,28 @@ function clearLogs() {
   if (logView) logView.innerHTML = "";
 }
 
+// Wires the topbar's buttons. Called from wireEvents (full paint) AND from the
+// partial status update that rebuilds only the topbar — both must wire the same
+// set, so they share this helper (a divergence here once dropped Open server's
+// handler after the first WS status frame).
+function wireTopbar() {
+  const stopBtn = root.querySelector("#btn-stop");
+  if (stopBtn) stopBtn.onclick = doStop;
+  // Open the model server's built-in page. When the server is LAN-exposed it
+  // requires an API key, but its built-in page can't read that key from a URL —
+  // so first hand the user the key + how to paste it (see openServer).
+  const openBtn = root.querySelector("#btn-open-server");
+  if (openBtn) openBtn.onclick = () => openServer(openBtn.dataset.url);
+}
+
 function wireEvents() {
   // Sidebar item clicks
   root.querySelectorAll(".item[data-name]").forEach((el) => {
     el.onclick = () => selectModel(el.dataset.name);
   });
-  // Stop button in topbar
-  const stopBtn = root.querySelector("#btn-stop");
-  if (stopBtn) stopBtn.onclick = doStop;
+  // Topbar buttons (also rewired by the partial status update — keep in sync
+  // via the shared helper).
+  wireTopbar();
   // Connect-an-agent button (detail pane, enabled only for the running model)
   const connectBtn = root.querySelector("#btn-connect");
   if (connectBtn) connectBtn.onclick = showConnect;
@@ -441,6 +455,75 @@ function clearBusy() {
 }
 
 // ── "Connect an agent" modal ──────────────────────────────────────────
+// Opens the model server's built-in page. A keyless (loopback) server opens
+// straight away. A LAN-exposed server is protected by an API key, but its
+// built-in page authenticates from its OWN localStorage (set via its Settings
+// dialog) and ignores any key in the URL — so we can't pre-authenticate it from
+// here. Instead we hand the user the key + a one-time "paste it into Settings"
+// step, then open the page.
+async function openServer(url) {
+  let info;
+  try {
+    info = await api.connectionInfo();
+  } catch (e) {
+    // Connection-info is best-effort here; if it fails, just open the page.
+    window.open(url, "_blank", "noopener");
+    return;
+  }
+  const key = info.inference_key || "";
+  if (!key) {  // keyless (loopback) server — open directly, as before
+    window.open(url, "_blank", "noopener");
+    return;
+  }
+
+  const keyId = "open-key-input";
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal">
+      <h3>This server needs its API key</h3>
+      <p class="modal-intro">The model server is exposed on your LAN, so it's
+        protected by an API key. Its built-in page can't read that key
+        automatically — paste it in once:</p>
+      <ol class="modal-steps">
+        <li>Copy the key below.</li>
+        <li>Click <b>Open server</b>, then in that page open
+          <b>⚙ Settings → API Key</b>, paste, and save.</li>
+      </ol>
+      <div class="field"><label>API key</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input id="${keyId}" type="password" value="${esc(key)}" readonly style="flex:1"/>
+          <button class="btn ghost" id="btn-open-reveal" style="padding:5px 10px;font-size:12px">Reveal</button>
+          <button class="btn ghost" id="btn-open-copy" style="padding:5px 10px;font-size:12px">Copy</button>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="btn-open-go">Open server ↗</button>
+        <button class="btn ghost" id="btn-open-cancel">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  overlay.querySelector("#btn-open-cancel").onclick = close;
+  overlay.onclick = (e) => { if (e.target === overlay) close(); };
+  overlay.querySelector("#btn-open-reveal").onclick = () => {
+    const inp = overlay.querySelector(`#${keyId}`);
+    inp.type = inp.type === "password" ? "text" : "password";
+    overlay.querySelector("#btn-open-reveal").textContent = inp.type === "password" ? "Reveal" : "Hide";
+  };
+  overlay.querySelector("#btn-open-copy").onclick = () => {
+    navigator.clipboard.writeText(key).catch(() => {});
+    overlay.querySelector("#btn-open-copy").textContent = "Copied!";
+    setTimeout(() => { overlay.querySelector("#btn-open-copy").textContent = "Copy"; }, 1500);
+  };
+  overlay.querySelector("#btn-open-go").onclick = () => {
+    navigator.clipboard.writeText(key).catch(() => {});  // copy on open too, for convenience
+    window.open(url, "_blank", "noopener");
+    close();
+  };
+}
+
 // Connects an agent/app to the RUNNING model. On the host (loopback) the daemon
 // runs as the user and binds Hermes in one click; for a remote machine it can't
 // write that machine's config, so we hand over the command (Hermes) and the raw
@@ -591,8 +674,7 @@ function onStream(msg) {
     if (sideEl) sideEl.outerHTML = renderSidebar();
     // Rewire events for the rebuilt topbar + sidebar (Connect lives in the
     // detail pane, which this partial update leaves intact — no rewire needed).
-    const stopBtn = root.querySelector("#btn-stop");
-    if (stopBtn) stopBtn.onclick = doStop;
+    wireTopbar();
     root.querySelectorAll(".item[data-name]").forEach((el) => {
       el.onclick = () => selectModel(el.dataset.name);
     });

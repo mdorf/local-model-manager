@@ -56,3 +56,24 @@ def test_recommend_endpoint(tmp_path):
 def test_recommend_unknown_model_404(tmp_path):
     r = _client(tmp_path).get("/api/models/nope.gguf/recommend", headers=_H)
     assert r.status_code == 404
+
+
+def test_recommend_uses_daemon_host_and_key_when_lan(tmp_path):
+    # Regression: recommend must bind the model to the daemon's host + add an
+    # api-key when LAN-exposed, matching what the launcher does. Otherwise the
+    # editable/override flags carry --host 127.0.0.1 and models launch on loopback.
+    write_minimal_gguf(tmp_path / "Qwen3.6-27B-Q8_0.gguf", _META,
+                       ["blk.64.nextn.eh_proj.weight"])
+    cfg = DaemonConfig(host="0.0.0.0", port=8770, token="t",
+                       inference_key="INFKEY", roots=[str(tmp_path)])
+    flags = TestClient(create_app(cfg)).get(
+        "/api/models/Qwen3.6-27B-Q8_0.gguf/recommend", headers=_H).json()["flags"]
+    assert flags[flags.index("--host") + 1] == "0.0.0.0"
+    assert "--api-key" in flags and flags[flags.index("--api-key") + 1] == "INFKEY"
+
+    # loopback daemon → loopback model, no api-key (llama-server's own UI stays keyless)
+    cfg2 = DaemonConfig(host="127.0.0.1", port=8770, token="t", roots=[str(tmp_path)])
+    flags2 = TestClient(create_app(cfg2)).get(
+        "/api/models/Qwen3.6-27B-Q8_0.gguf/recommend", headers=_H).json()["flags"]
+    assert flags2[flags2.index("--host") + 1] == "127.0.0.1"
+    assert "--api-key" not in flags2

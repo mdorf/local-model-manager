@@ -158,11 +158,16 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
         if model is None:
             raise HTTPException(status_code=404, detail="model not found")
         metadata = read_gguf(model.shards[0]).metadata
-        # 8080 = the default model-server port for the preview (config.port is
-        # the *daemon* control port, not where llama-server listens).
+        # Match what the daemon will actually launch (see _default_command_builder):
+        # bind to the daemon's host, add the inference api-key when LAN-exposed.
+        # Otherwise the editable/override flags would carry --host 127.0.0.1 and the
+        # model would launch on loopback even though the daemon is LAN-bound.
+        # 8080 = the default model-server port (config.port is the daemon control port).
+        lan = not is_loopback(config.host)
         cfg = recommend_config(model, metadata, detect_hardware(),
                                supported=get_supported_flags() or None,
-                               port=8080, alias=model.path.stem)
+                               host=config.host, port=8080, alias=model.path.stem,
+                               api_key=config.inference_key if lan else None)
         return {"model": model.path.name, "context": cfg.context,
                 "cache_type": cfg.cache_type, "flags": cfg.flags,
                 "warnings": cfg.warnings,

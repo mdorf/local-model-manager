@@ -126,6 +126,8 @@ lmm token     # prints the bearer token to paste on the client
 
 Then on the other machine open `http://<host-ip>:8770` (e.g. `http://192.168.1.78:8770`) and paste the token once. (If macOS prompts to allow incoming connections, allow it.)
 
+**Reaching the model from another machine.** A model you start (or **Reload**) while the daemon is LAN-bound is automatically reachable at `http://<host-ip>:8080` — it inherits the daemon's host and gets an inference api-key. To point an agent at it from another machine, open **"Connect an agent"** in the UI: it shows the exact base URL (`http://<host-ip>:8080/v1`), the model id, and the api-key to paste into Hermes or any OpenAI-compatible client. (A model that was already running stays on its original host until you Reload it.)
+
 > ⚠️ **Only do this on a network you trust.** The control plane is token-gated and inference gets an `--api-key` automatically when LAN-exposed — but the daemon runs as **you** and spawns processes, so a compromise of the network-facing daemon carries your account's privileges. Keep it on a LAN you control; never port-forward it to the internet. See [Security](#security).
 
 ---

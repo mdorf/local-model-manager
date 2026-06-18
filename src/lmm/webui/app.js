@@ -816,6 +816,15 @@ function legacyCopy(text) {
   } catch (e) { /* give up silently — the value is still shown for manual copy */ }
 }
 
+// Esc closes the topmost open modal. All modals share `.modal-overlay`, so this
+// one listener covers Connect/Open-server and any modal added later. Registered
+// once at module load. (The token gate isn't a modal-overlay, so it's unaffected.)
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  const overlays = document.querySelectorAll(".modal-overlay");
+  if (overlays.length) overlays[overlays.length - 1].remove();
+});
+
 // ── Entry point ───────────────────────────────────────────────────────
 async function main() {
   if (!hasToken()) { tokenGate(); return; }

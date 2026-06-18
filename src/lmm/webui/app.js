@@ -509,7 +509,7 @@ async function openServer(url) {
       </div>
       <div class="modal-actions">
         <button class="btn" id="btn-open-go">Open server ↗</button>
-        <button class="btn ghost" id="btn-open-cancel">Cancel</button>
+        <button class="btn ghost" id="btn-open-cancel">Close</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);

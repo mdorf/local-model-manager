@@ -171,7 +171,7 @@ function renderDetail() {
   }
   const rec = selected;
   const fit = rec.fit || {};
-  const flagsText = flagsToLines(rec.flags || []).join(" \\\n");
+  const flagsText = flagsToLines(rec.flags || []).join("\n");
   const warningsHtml = (rec.warnings || []).length
     ? `<div class="warnings">${rec.warnings.map(w => `<div class="warn-item">⚠ ${esc(w)}</div>`).join("")}</div>`
     : "";
@@ -340,7 +340,7 @@ function wireEvents() {
   const flagsReset = root.querySelector("#flags-reset");
   if (flagsReset) flagsReset.onclick = () => {
     const ta = document.getElementById("flags-edit");
-    if (ta && selected) ta.value = flagsToLines(selected.flags || []).join(" \\\n");
+    if (ta && selected) ta.value = flagsToLines(selected.flags || []).join("\n");
     const sel = document.getElementById("ctx-select");
     if (sel && selected) sel.value = String(selected.context);
   };
@@ -354,7 +354,7 @@ function wireEvents() {
     const i = toks.indexOf("-c");
     if (i >= 0 && i + 1 < toks.length) toks[i + 1] = ctxSel.value;
     else toks.push("-c", ctxSel.value);
-    ta.value = flagsToLines(toks).join(" \\\n");
+    ta.value = flagsToLines(toks).join("\n");
   };
 }
 
@@ -374,7 +374,7 @@ async function selectModel(name) {
 function readFlagOverride() {
   const ta = document.getElementById("flags-edit");
   if (!ta || !selected) return null;
-  const original = flagsToLines(selected.flags || []).join(" \\\n");
+  const original = flagsToLines(selected.flags || []).join("\n");
   if (ta.value.trim() === original.trim()) return null;
   const toks = ta.value.replace(/\\\s*\n/g, " ").trim().split(/\s+/).filter(Boolean);
   return toks.length ? toks : null;

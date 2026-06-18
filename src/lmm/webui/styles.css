@@ -395,6 +395,22 @@ textarea.flags:focus { outline: none; border-color: var(--accent); }
 }
 .busy .actions button, .busy #btn-stop { opacity: .5; pointer-events: none; }
 
+/* First-load placeholder (lives in index.html so it shows the instant the page
+   parses, before app.js downloads/runs and the initial data fetch completes —
+   paint()/tokenGate() replace #app once ready). */
+.app-boot {
+  position: fixed; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; background: var(--bg);
+}
+.app-boot-spinner {
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 3px solid var(--gauge-bg); border-top-color: var(--accent);
+  animation: lmm-spin 0.8s linear infinite;
+}
+.app-boot-text { font-size: 13px; color: var(--fg-muted); }
+@keyframes lmm-spin { to { transform: rotate(360deg); } }
+
 /* "Connect an agent" modal */
 .modal-intro { font-size: 13px; color: var(--fg-muted); margin: 0 0 14px; line-height: 1.5; }
 .connect-section {

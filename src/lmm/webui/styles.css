@@ -251,6 +251,14 @@ textarea.flags:focus { outline: none; border-color: var(--accent); }
 .btn.ghost:disabled:hover { background: transparent; }
 .btn.danger { background: var(--red); }
 .btn.danger:hover { background: #b91c1c; }
+/* Ghost buttons in the black topbar (e.g. "Open server") need a dark-surface
+   treatment — the default light-UI ghost (accent text, light border) blends in. */
+.topbar .btn.ghost {
+  color: #e5e7eb;
+  background: rgba(255, 255, 255, 0.07);
+  border-color: #6b7280;
+}
+.topbar .btn.ghost:hover { background: rgba(255, 255, 255, 0.18); border-color: #9ca3af; }
 
 /* ── Error / info banner ────────────────────────────────────────────── */
 .banner {

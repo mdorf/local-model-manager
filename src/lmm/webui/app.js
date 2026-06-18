@@ -272,6 +272,8 @@ function renderDrawer() {
     <div class="drawer-header">
       <span class="drawer-title">Live Logs</span>
       <span class="ws-state ${stateClass}">${wsState}</span>
+      <button class="log-clear" id="btn-clear-logs"
+        title="Clear the log view — new messages keep streaming; the server's log file is untouched">Clear</button>
     </div>
     <div class="logs" id="log-view">${linesHtml}</div>
   </div>`;
@@ -297,8 +299,10 @@ function scrollLogsToBottom() {
   if (logView) logView.scrollTop = logView.scrollHeight;
 }
 
-// Reset the log view so a switch/start shows only the new model's logs (the
-// daemon truncates server-<port>.log on switch; the WS then re-streams it).
+// Clears the client-side log buffer + view. Used on switch/start (so only the
+// new model's logs show — the daemon truncates server-<port>.log on switch) AND
+// by the drawer's "Clear" button (a purely visual reset). Either way the
+// server's log file is untouched and new streamed lines keep appending.
 function clearLogs() {
   logLines = [];
   const logView = document.getElementById("log-view");
@@ -330,6 +334,10 @@ function wireEvents() {
   // Connect-an-agent button (detail pane, enabled only for the running model)
   const connectBtn = root.querySelector("#btn-connect");
   if (connectBtn) connectBtn.onclick = showConnect;
+  // Clear the log view (visual only — see clearLogs). The drawer survives the
+  // partial status update, so wiring it on full paint is enough.
+  const clearBtn = root.querySelector("#btn-clear-logs");
+  if (clearBtn) clearBtn.onclick = clearLogs;
   // Start/Switch button (and Reload, which is the same path: switch the running
   // server to the edited launch config)
   const startBtn = root.querySelector("#btn-start");

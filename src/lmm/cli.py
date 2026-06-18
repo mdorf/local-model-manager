@@ -18,7 +18,11 @@ from lmm.daemonconfig import load_or_create_config, rotate_token
 from lmm.discovery import discover_models
 from lmm.gguf import read_gguf
 from lmm.hardware import detect_hardware
-from lmm.hermes import DEFAULT_HERMES_CONFIG, bind as hermes_bind, unbind as hermes_unbind
+from lmm.hermes import (
+    bind as hermes_bind,
+    profile_config_path as hermes_profile_config_path,
+    unbind as hermes_unbind,
+)
 from lmm.llama import get_supported_flags
 from lmm.recommend import recommend_config
 from lmm.server import ServerManager
@@ -199,8 +203,16 @@ def _detect_served_model(host: str, port: int) -> str | None:
     return models[0].get("id") if models else None
 
 
+def _resolve_hermes_config(args: argparse.Namespace) -> Path:
+    """An explicit --hermes-config path wins; otherwise resolve --profile by name
+    (portable across machines). Defaults to the active ~/.hermes/config.yaml."""
+    if args.hermes_config:
+        return Path(args.hermes_config)
+    return hermes_profile_config_path(getattr(args, "profile", None))
+
+
 def cmd_bind(args: argparse.Namespace) -> int:
-    config_path = Path(args.hermes_config)
+    config_path = _resolve_hermes_config(args)
     if not config_path.exists():
         print(f"Hermes config not found: {config_path}")
         return 1
@@ -219,12 +231,14 @@ def cmd_bind(args: argparse.Namespace) -> int:
     print(f"Bound {config_path} -> {info['provider']} / {info['model']} @ {info['base_url']}")
     print("note: reasoning models (e.g. Qwen3.6) need a generous max_tokens — "
           "set it in your Hermes client if replies come back empty.")
-    print("revert with: lmm unbind --hermes-config " + str(config_path))
+    revert = (f"--profile {args.profile}" if getattr(args, "profile", None) and not args.hermes_config
+              else f"--hermes-config {config_path}")
+    print(f"revert with: lmm unbind {revert}")
     return 0
 
 
 def cmd_unbind(args: argparse.Namespace) -> int:
-    config_path = Path(args.hermes_config)
+    config_path = _resolve_hermes_config(args)
     if hermes_unbind(config_path):
         print(f"Reverted {config_path} from its pre-bind backup.")
     else:
@@ -510,14 +524,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_bind.add_argument("--port", type=int, default=8080)
     p_bind.add_argument("--host", default="127.0.0.1")
     p_bind.add_argument("--provider-name", default="local")
-    p_bind.add_argument("--hermes-config", default=str(DEFAULT_HERMES_CONFIG),
-                        help="path to the target Hermes config.yaml")
+    p_bind.add_argument("--profile", default=None,
+                        help="Hermes profile name to bind (e.g. qwen-herm); "
+                             "'default'/omit = the active ~/.hermes/config.yaml")
+    p_bind.add_argument("--hermes-config", default=None,
+                        help="explicit path to a Hermes config.yaml (overrides --profile)")
     p_bind.add_argument("--api-key", default=None,
                         help="inference key (default: this host's inference_key)")
     p_bind.set_defaults(func=cmd_bind)
 
     p_unbind = sub.add_parser("unbind", help="revert a Hermes config bound by lmm")
-    p_unbind.add_argument("--hermes-config", default=str(DEFAULT_HERMES_CONFIG))
+    p_unbind.add_argument("--profile", default=None,
+                          help="Hermes profile name to revert (default = active config)")
+    p_unbind.add_argument("--hermes-config", default=None,
+                          help="explicit path (overrides --profile)")
     p_unbind.set_defaults(func=cmd_unbind)
 
     p_install = sub.add_parser("install", help="install the daemon as a system service (sudo)")

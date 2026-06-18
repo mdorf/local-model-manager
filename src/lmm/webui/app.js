@@ -562,7 +562,12 @@ async function showConnect() {
   const host = location.hostname;
   const baseUrl = `http://${host}:${running.port}/v1`;
   const keyArg = info.inference_key ? ` --api-key ${info.inference_key}` : "";
-  const bindCmd = `lmm bind ${running.model} --host ${host} --port ${running.port}${keyArg}`;
+  // The remote command targets the SAME profile name picked in the dropdown
+  // (resolved on that machine's own ~/.hermes). Rebuilt when the picker changes.
+  const remoteCmd = (prof) =>
+    `lmm bind ${running.model} --host ${host} --port ${running.port}${keyArg}` +
+    (prof && prof !== "default" ? ` --profile ${prof}` : "");
+  let bindCmd = remoteCmd(profiles[0] ? profiles[0].name : "default");
   // Hermes already points at this running model (#2) → re-binding is a no-op,
   // so show it as done and disabled rather than an active button.
   // Profile picker: bind targets the chosen Hermes profile (e.g. qwen-herm),
@@ -642,6 +647,14 @@ async function showConnect() {
     copyToClipboard(bindCmd);
     overlay.querySelector("#btn-copy-cmd").textContent = "Copied!";
     setTimeout(() => { overlay.querySelector("#btn-copy-cmd").textContent = "Copy command"; }, 1500);
+  };
+
+  // Picking a profile updates both the host bind target and the remote command.
+  const profSel = overlay.querySelector("#bind-profile");
+  if (profSel) profSel.onchange = () => {
+    bindCmd = remoteCmd(profSel.options[profSel.selectedIndex].text);
+    const cmdEl = overlay.querySelector("#conn-cmd");
+    if (cmdEl) cmdEl.textContent = bindCmd;
   };
 
   const bindNowBtn = overlay.querySelector("#btn-bind-now");

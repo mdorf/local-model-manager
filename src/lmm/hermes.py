@@ -17,6 +17,17 @@ def _yaml() -> YAML:
     return y
 
 
+def profile_config_path(name: str | None, hermes_dir: str | Path | None = None) -> Path:
+    """Resolve a Hermes profile NAME to its config path. ``None``/``""``/``default``
+    → the root ``~/.hermes/config.yaml``; any other name →
+    ``~/.hermes/profiles/<name>/config.yaml``. Name-based (not absolute path) so the
+    same command is portable across machines (each resolves its own ~/.hermes)."""
+    base = Path(hermes_dir) if hermes_dir else Path.home() / ".hermes"
+    if name in (None, "", "default"):
+        return base / "config.yaml"
+    return base / "profiles" / name / "config.yaml"
+
+
 def list_profiles(hermes_dir: str | Path | None = None) -> list[dict]:
     """List the operator's Hermes profiles so the bind UI can target a specific
     one (not just the active config). Returns the default profile (the root

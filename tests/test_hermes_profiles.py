@@ -1,4 +1,13 @@
-from lmm.hermes import list_profiles
+from lmm.hermes import list_profiles, profile_config_path
+
+
+def test_profile_config_path_resolution(tmp_path):
+    hd = tmp_path / ".hermes"
+    # default / None / "" all resolve to the root config
+    for name in (None, "", "default"):
+        assert profile_config_path(name, hd) == hd / "config.yaml"
+    # a named profile resolves under profiles/<name>/
+    assert profile_config_path("qwen-herm", hd) == hd / "profiles" / "qwen-herm" / "config.yaml"
 
 
 def test_lists_default_root_and_named_profiles(tmp_path):

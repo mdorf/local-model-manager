@@ -240,12 +240,11 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
         return {"bound": True, **info}
 
     @app.get("/api/hermes-profiles", dependencies=[Depends(auth)])
-    def hermes_profiles(request: Request):
-        # Loopback-only (same as bind): lists the host operator's local Hermes
-        # profiles so the UI can bind a chosen profile, not just the active one.
-        client = request.client.host if request.client else None
-        if client not in _LOOPBACK_HOSTS:
-            return {"profiles": []}
+    def hermes_profiles():
+        # Token-gated but NOT loopback-only: a LAN client needs the profile names
+        # to set --profile on the `lmm bind` command it runs on its own machine.
+        # (Binding itself stays loopback-only — see POST /api/bind.) Only names +
+        # paths are returned, no config contents.
         return {"profiles": hermes_list_profiles()}
 
     @app.get("/api/bind-status", dependencies=[Depends(auth)])

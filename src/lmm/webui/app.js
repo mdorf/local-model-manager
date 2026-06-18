@@ -570,18 +570,28 @@ async function showConnect() {
   let bindCmd = remoteCmd(profiles[0] ? profiles[0].name : "default");
   // Hermes already points at this running model (#2) → re-binding is a no-op,
   // so show it as done and disabled rather than an active button.
-  // Profile picker: bind targets the chosen Hermes profile (e.g. qwen-herm),
-  // not just the active config. Remote clients get no profiles (loopback-only) →
-  // fall back to a plain button that 403s with a "use the command" hint.
+  // Profile picker: bind targets the chosen Hermes profile (e.g. qwen-herm).
   const profileOptions = profiles.map((p) =>
     `<option value="${esc(p.path)}">${esc(p.name)}</option>`).join("");
-  const bindRowHtml = profiles.length
-    ? `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-         <label class="modal-sub" style="margin:0">Profile</label>
-         <select id="bind-profile" class="ctx-select" style="min-width:130px">${profileOptions}</select>
+  const profileSelect = profiles.length
+    ? `<select id="bind-profile" class="ctx-select" style="min-width:130px">${profileOptions}</select>`
+    : "";
+  // One-click in-app bind is loopback-only (the daemon can only write the host
+  // operator's ~/.hermes). Show it only when viewing from the host itself; over
+  // the LAN the picker moves down to the command (which runs on the remote box).
+  const hostIsLoopback = ["127.0.0.1", "localhost", "::1", "[::1]"].includes(location.hostname);
+  const hostBindHtml = hostIsLoopback
+    ? `<p class="modal-sub">On <b>this host</b>, bind a Hermes profile to this model:</p>
+       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+         ${profiles.length ? `<label class="modal-sub" style="margin:0">Profile</label>${profileSelect}` : ""}
          <button class="btn" id="btn-bind-now">Bind</button>
        </div>`
-    : `<button class="btn" id="btn-bind-now">Bind Hermes on this host</button>`;
+    : "";
+  const cmdProfileHtml = (!hostIsLoopback && profiles.length)
+    ? `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:6px 0">
+         <label class="modal-sub" style="margin:0">Profile</label>${profileSelect}
+       </div>`
+    : "";
   const keyId = "conn-key-input";
   const hasKey = !!info.inference_key;
   const keyFieldHtml = hasKey
@@ -604,10 +614,11 @@ async function showConnect() {
 
       <div class="connect-section">
         <h4>Using Hermes</h4>
-        <p class="modal-sub">On <b>this host</b>, bind a Hermes profile to this model:</p>
-        ${bindRowHtml}
+        ${hostBindHtml}
         <p class="modal-sub" style="margin-top:10px">On another machine, run this once
-          (updates that machine's <code>~/.hermes/config.yaml</code>):</p>
+          (a profile of that name must exist there; updates that machine's
+          <code>~/.hermes/config.yaml</code>):</p>
+        ${cmdProfileHtml}
         <code class="block" id="conn-cmd">${esc(bindCmd)}</code>
         <button class="btn ghost" id="btn-copy-cmd">Copy command</button>
       </div>

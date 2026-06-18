@@ -15,18 +15,18 @@ _META = {
     "qwen35.attention.value_length": 256,
 }
 
-_SUPPORTED = {"-m", "-ngl", "-fa", "--cache-type-k", "--cache-type-v",
+_SUPPORTED = {"-m", "-ngl", "-fa", "--jinja", "--cache-type-k", "--cache-type-v",
               "--spec-type", "--spec-draft-n-max", "-t", "-c", "--host",
               "--port", "--alias"}
 
 
-def _model(tmp_path, *, has_mtp, size_bytes):
+def _model(tmp_path, *, has_mtp, size_bytes, has_chat_template=False):
     f = tmp_path / "m.gguf"
     f.write_bytes(b"\x00" * size_bytes)
     return Model(path=f, arch="qwen35", name="m", family="qwen3.6",
                  size_label="27B", quant="Q8_0", block_count=65,
                  context_length=262144, has_mtp=has_mtp, hf_base_repo=None,
-                 shards=[f], sidecars=[])
+                 shards=[f], sidecars=[], has_chat_template=has_chat_template)
 
 
 def _hw(total_gib):
@@ -110,6 +110,28 @@ def test_recommend_omits_mtp_when_model_lacks_head(tmp_path):
     m = _model(tmp_path, has_mtp=False, size_bytes=1000)
     cfg = recommend_config(m, _META, _hw(64), supported=_SUPPORTED)
     assert "--spec-type" not in cfg.flags
+
+
+def test_recommend_adds_jinja_when_embedded_chat_template(tmp_path):
+    # The model ships a jinja chat template → render it faithfully (correct
+    # tool-calling + lets --chat-template-kwargs apply). It's an editable knob.
+    m = _model(tmp_path, has_mtp=False, size_bytes=1000, has_chat_template=True)
+    cfg = recommend_config(m, _META, _hw(64), supported=_SUPPORTED)
+    assert "--jinja" in cfg.tuning_flags
+
+
+def test_recommend_omits_jinja_without_chat_template(tmp_path):
+    m = _model(tmp_path, has_mtp=False, size_bytes=1000, has_chat_template=False)
+    cfg = recommend_config(m, _META, _hw(64), supported=_SUPPORTED)
+    assert "--jinja" not in cfg.flags
+
+
+def test_recommend_drops_jinja_when_unsupported(tmp_path):
+    m = _model(tmp_path, has_mtp=False, size_bytes=1000, has_chat_template=True)
+    supported = _SUPPORTED - {"--jinja"}
+    cfg = recommend_config(m, _META, _hw(64), supported=supported)
+    assert "--jinja" not in cfg.flags
+    assert any("jinja" in w for w in cfg.warnings)
 
 
 def test_recommend_drops_unsupported_flags_with_warning(tmp_path):

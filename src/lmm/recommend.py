@@ -77,6 +77,12 @@ def _tuning_groups(model: Model, hardware: HardwareInfo, context: int,
     if hardware.has_metal:
         groups.append(["-ngl", "999"])
     groups.append(["-fa", "on"])
+    if model.has_chat_template:
+        # The model ships an embedded jinja chat template — render it faithfully
+        # (correct tool/function calling, and required for --chat-template-kwargs
+        # like enable_thinking to take effect). Basic chat works without it, but
+        # this matches upstream/model-card recommendations.
+        groups.append(["--jinja"])
     groups.append(["--cache-type-k", cache_type])
     groups.append(["--cache-type-v", cache_type])
     if model.has_mtp:

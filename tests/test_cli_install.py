@@ -1,13 +1,35 @@
 import pytest
 
+import json
+
 from lmm.cli import (
     _install_child_path,
     _install_user,
     _resolve_project_dir,
+    _write_daemon_config,
     build_parser,
     cmd_install,
     cmd_uninstall,
 )
+
+
+def test_write_daemon_config_syncs_host_preserves_secrets(tmp_path):
+    # A --reinstall that changes --host must refresh daemon.json's host (it decides
+    # the model's bind), while keeping the token/inference_key so clients keep working.
+    p = tmp_path / "daemon.json"
+    p.write_text(json.dumps({"host": "127.0.0.1", "port": 8770, "token": "KEEPTOK",
+                             "inference_key": "KEEPKEY", "roots": ["/old"]}))
+    _write_daemon_config(p, host="0.0.0.0", port=8770, models_dir="/new")
+    d = json.loads(p.read_text())
+    assert d["host"] == "0.0.0.0"          # synced to this install (the fix)
+    assert d["token"] == "KEEPTOK"          # secrets preserved across reinstall
+    assert d["inference_key"] == "KEEPKEY"
+    assert d["roots"] == ["/new"]
+    # fresh install (no existing file) generates secrets
+    p2 = tmp_path / "fresh.json"
+    _write_daemon_config(p2, host="0.0.0.0", port=8770, models_dir="/m")
+    d2 = json.loads(p2.read_text())
+    assert d2["host"] == "0.0.0.0" and len(d2["token"]) >= 16
 
 
 @pytest.fixture

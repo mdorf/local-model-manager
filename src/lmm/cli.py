@@ -253,6 +253,25 @@ def _resolve_project_dir(args: argparse.Namespace) -> str | None:
     return str(cand) if (cand / "pyproject.toml").exists() else None
 
 
+def _write_daemon_config(path: Path, *, host: str, port: int, models_dir: str) -> None:
+    """Write daemon.json for an install. Preserves the token + inference_key across
+    re-installs (so clients keep working), but always refreshes host/port/roots to
+    match THIS install — otherwise `--reinstall --host 0.0.0.0` would update the
+    launchd plist while daemon.json (which decides the model's bind host + whether
+    an inference api-key is set) stayed stale, so models would launch on loopback."""
+    existing = {}
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text())
+        except (OSError, ValueError):
+            existing = {}
+    path.write_text(json.dumps({
+        "host": host, "port": port,
+        "token": existing.get("token") or secrets.token_hex(24),
+        "inference_key": existing.get("inference_key") or secrets.token_hex(24),
+        "roots": [models_dir]}, indent=2))
+
+
 def _install_child_path(user: str) -> str:
     """PATH for install-time subprocesses (uv, llama-server). sudo strips the
     caller's PATH, so prepend the invoking user's bin dirs — lets
@@ -323,12 +342,8 @@ def cmd_install(args: argparse.Namespace) -> int:
     Path(deploy.plist_install_path()).write_text(plist_xml)
     _run(deploy.shared_setup_steps(user=user, shared_dir=SHARED_DIR), critical=True)
     daemon_json = Path(SHARED_DIR) / "daemon.json"
-    if not daemon_json.exists():
-        daemon_json.write_text(json.dumps({
-            "host": args.host, "port": args.port,
-            "token": secrets.token_hex(24),
-            "inference_key": secrets.token_hex(24),
-            "roots": [args.models_dir]}, indent=2))
+    _write_daemon_config(daemon_json, host=args.host, port=args.port,
+                         models_dir=args.models_dir)
     _run(deploy.shared_venv_steps(shared_dir=SHARED_DIR, project_dir=project_dir,
                                   user=user, clear=args.reinstall), critical=True)
     _run(deploy.plist_steps(user=user), critical=True)
@@ -428,6 +443,12 @@ def cmd_daemon(args: argparse.Namespace) -> int:
     config = load_or_create_config()
     host = args.host or config.host
     port = args.port or config.port
+    # The model-launch builder reads config.host to decide where to bind llama-server
+    # and whether to set an inference api-key. Pin it to the host we ACTUALLY bind to
+    # (e.g. --host 0.0.0.0 from the plist), so a stale daemon.json can't make models
+    # launch on loopback while the daemon itself is LAN-exposed.
+    config.host = host
+    config.port = port
     # Detect a model server that's already running (manually launched, or one
     # that outlived a daemon restart) so the UI reflects reality on startup.
     manager = ServerManager()

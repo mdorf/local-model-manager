@@ -33,6 +33,7 @@ export const api = {
   connectionInfo: () => req("GET", "/api/connection-info"),
   bind: (body) => req("POST", "/api/bind", body || {}),
   bindStatus: () => req("GET", "/api/bind-status"),
+  hermesProfiles: () => req("GET", "/api/hermes-profiles"),
 };
 
 export function openStream(onMsg, onState) {

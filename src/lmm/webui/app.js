@@ -548,6 +548,11 @@ async function showConnect() {
     handleError(e);
     return;
   }
+  // The operator's Hermes profiles, so bind can target a specific one (e.g.
+  // qwen-herm) instead of always the active config. Loopback-only; empty for
+  // remote clients (they bind via the command below).
+  let profiles = [];
+  try { profiles = (await api.hermesProfiles()).profiles || []; } catch (e) { /* best-effort */ }
 
   const modelId = info.model_id || running.model;
   // Build the remote-bind command + Base URL from the host the browser actually
@@ -560,10 +565,17 @@ async function showConnect() {
   const bindCmd = `lmm bind ${running.model} --host ${host} --port ${running.port}${keyArg}`;
   // Hermes already points at this running model (#2) → re-binding is a no-op,
   // so show it as done and disabled rather than an active button.
-  const alreadyBound = !!bound.bound;
-  const bindBtnHtml = alreadyBound
-    ? `<button class="btn" id="btn-bind-now" disabled
-         title="Hermes already points at this model">✓ Hermes is bound to this model</button>`
+  // Profile picker: bind targets the chosen Hermes profile (e.g. qwen-herm),
+  // not just the active config. Remote clients get no profiles (loopback-only) →
+  // fall back to a plain button that 403s with a "use the command" hint.
+  const profileOptions = profiles.map((p) =>
+    `<option value="${esc(p.path)}">${esc(p.name)}</option>`).join("");
+  const bindRowHtml = profiles.length
+    ? `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+         <label class="modal-sub" style="margin:0">Profile</label>
+         <select id="bind-profile" class="ctx-select" style="min-width:130px">${profileOptions}</select>
+         <button class="btn" id="btn-bind-now">Bind</button>
+       </div>`
     : `<button class="btn" id="btn-bind-now">Bind Hermes on this host</button>`;
   const keyId = "conn-key-input";
   const hasKey = !!info.inference_key;
@@ -587,8 +599,8 @@ async function showConnect() {
 
       <div class="connect-section">
         <h4>Using Hermes</h4>
-        <p class="modal-sub">On <b>this host</b>, bind in one click:</p>
-        ${bindBtnHtml}
+        <p class="modal-sub">On <b>this host</b>, bind a Hermes profile to this model:</p>
+        ${bindRowHtml}
         <p class="modal-sub" style="margin-top:10px">On another machine, run this once
           (updates that machine's <code>~/.hermes/config.yaml</code>):</p>
         <code class="block" id="conn-cmd">${esc(bindCmd)}</code>
@@ -633,21 +645,25 @@ async function showConnect() {
   };
 
   const bindNowBtn = overlay.querySelector("#btn-bind-now");
-  if (bindNowBtn && !alreadyBound) bindNowBtn.onclick = async () => {
-    const btn = bindNowBtn;
-    btn.disabled = true;
-    btn.textContent = "Binding…";
+  if (bindNowBtn) bindNowBtn.onclick = async () => {
+    const sel = overlay.querySelector("#bind-profile");
+    const cfgPath = sel ? sel.value : null;
+    const profName = sel ? sel.options[sel.selectedIndex].text : "Hermes";
+    const idle = profiles.length ? "Bind" : "Bind Hermes on this host";
+    bindNowBtn.disabled = true;
+    bindNowBtn.textContent = "Binding…";
     try {
-      const res = await api.bind({});
-      btn.textContent = "✓ Bound Hermes to " + (res.model || modelId);
+      await api.bind(cfgPath ? { hermes_config: cfgPath } : {});
+      bindNowBtn.textContent = `✓ Bound ${profName}`;
       await refreshBindStatus();
-      paint();  // surfaces the "✓ Hermes bound" badge (modal lives on <body>, survives)
+      paint();  // refresh the "✓ Hermes bound" badge (modal lives on <body>, survives)
+      setTimeout(() => { bindNowBtn.disabled = false; bindNowBtn.textContent = idle; }, 1800);
     } catch (e) {
-      btn.disabled = false;
+      bindNowBtn.disabled = false;
       if (e && e.code === 403) {
-        btn.textContent = "Only available on the host — use the command ↓";
+        bindNowBtn.textContent = "Host only — use the command ↓";
       } else {
-        btn.textContent = "Bind Hermes on this host";
+        bindNowBtn.textContent = idle;
         showBanner(e && e.message ? "Bind failed: " + e.message : "Bind failed");
       }
     }

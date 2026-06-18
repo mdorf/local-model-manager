@@ -17,6 +17,26 @@ def _yaml() -> YAML:
     return y
 
 
+def list_profiles(hermes_dir: str | Path | None = None) -> list[dict]:
+    """List the operator's Hermes profiles so the bind UI can target a specific
+    one (not just the active config). Returns the default profile (the root
+    ``~/.hermes/config.yaml``) plus each ``~/.hermes/profiles/<name>/config.yaml``.
+    Each entry is ``{"name", "path"}``. Only paths/names are returned — no config
+    contents are read, so no secrets are exposed."""
+    base = Path(hermes_dir) if hermes_dir else Path.home() / ".hermes"
+    profiles: list[dict] = []
+    root = base / "config.yaml"
+    if root.is_file():
+        profiles.append({"name": "default", "path": str(root)})
+    pdir = base / "profiles"
+    if pdir.is_dir():
+        for d in sorted(pdir.iterdir()):
+            cfg = d / "config.yaml"
+            if cfg.is_file():
+                profiles.append({"name": d.name, "path": str(cfg)})
+    return profiles
+
+
 def bind(config_path: str | Path, *, base_url: str, model_id: str,
          provider_name: str = "local", api_key: str = "local") -> dict:
     """Point a Hermes config at a local server. Preserves comments/other keys;

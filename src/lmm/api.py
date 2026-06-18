@@ -18,6 +18,7 @@ from lmm.discovery import discover_models
 from lmm.gguf import read_gguf
 from lmm.hardware import detect_hardware
 from lmm.hermes import bind as hermes_bind
+from lmm.hermes import list_profiles as hermes_list_profiles
 from lmm.llama import get_supported_flags
 from lmm.logtail import read_log_tail, tail_new_lines
 from lmm.models import Model
@@ -237,6 +238,15 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
         info = hermes_bind(config_path, base_url=base_url, model_id=model_id,
                            provider_name=body.provider_name, api_key=api_key)
         return {"bound": True, **info}
+
+    @app.get("/api/hermes-profiles", dependencies=[Depends(auth)])
+    def hermes_profiles(request: Request):
+        # Loopback-only (same as bind): lists the host operator's local Hermes
+        # profiles so the UI can bind a chosen profile, not just the active one.
+        client = request.client.host if request.client else None
+        if client not in _LOOPBACK_HOSTS:
+            return {"profiles": []}
+        return {"profiles": hermes_list_profiles()}
 
     @app.get("/api/bind-status", dependencies=[Depends(auth)])
     def bind_status(request: Request):

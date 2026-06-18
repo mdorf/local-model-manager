@@ -27,8 +27,11 @@ class FakeManager:
         return True
 
 
-def fake_builder(model_name, port):
-    return ["llama-server", "-m", model_name, "--port", str(port)], f"/models/{model_name}"
+def fake_builder(model_name, port, tuning=None):
+    # mimic the real builder: daemon-owned plumbing + (recommended-or-overridden) tuning
+    cmd = ["llama-server", "-m", model_name, "--host", "0.0.0.0", "--port", str(port)]
+    cmd += tuning if tuning is not None else ["-ngl", "999"]
+    return cmd, f"/models/{model_name}"
 
 
 def _client():
@@ -82,28 +85,28 @@ def test_switch_port_in_use_returns_409():
     assert r.status_code == 409
 
 
-def test_start_with_flags_override_uses_them():
-    # When the UI sends edited flags, the daemon spawns exactly those (bypassing
-    # the recommended command_builder); model_path comes from the -m value.
+def test_start_with_flags_override_passes_tuning_to_builder():
+    # Edited flags are TUNING only; the endpoint passes them to the builder, which
+    # composes the daemon-owned plumbing around them (so host/port can't be edited).
     captured = {}
 
     class Cap(FakeManager):
         def start(self, command, *, port, model_path):
             captured["command"] = command
-            captured["model_path"] = model_path
             return super().start(command, port=port, model_path=model_path)
 
     cfg = DaemonConfig(host="127.0.0.1", port=8770, token="t", roots=["/x"])
     app = create_app(cfg, manager=Cap(), command_builder=fake_builder)
-    flags = ["-m", "/models/Foo.gguf", "-ngl", "999", "-c", "131072", "--port", "8080"]
+    tuning = ["-ngl", "999", "-c", "131072"]
     r = TestClient(app).post("/api/servers",
-                             json={"model": "Foo", "port": 8080, "flags": flags}, headers=H)
+                             json={"model": "Foo", "port": 8080, "flags": tuning}, headers=H)
     assert r.status_code == 200
-    assert captured["command"] == ["llama-server", *flags]
-    assert captured["model_path"] == "/models/Foo.gguf"
+    # tuning reached the launch, and the daemon's plumbing (--host) is present
+    assert "-c" in captured["command"] and "131072" in captured["command"]
+    assert "--host" in captured["command"]
 
 
-def test_switch_with_flags_override_uses_them():
+def test_switch_with_flags_override_passes_tuning_to_builder():
     captured = {}
 
     class Cap(FakeManager):
@@ -113,8 +116,9 @@ def test_switch_with_flags_override_uses_them():
 
     cfg = DaemonConfig(host="127.0.0.1", port=8770, token="t", roots=["/x"])
     app = create_app(cfg, manager=Cap(), command_builder=fake_builder)
-    flags = ["-m", "/models/Bar.gguf", "-c", "65536", "--port", "8080"]
+    tuning = ["-c", "65536"]
     r = TestClient(app).post("/api/servers/switch",
-                             json={"model": "Bar", "port": 8080, "flags": flags}, headers=H)
+                             json={"model": "Bar", "port": 8080, "flags": tuning}, headers=H)
     assert r.status_code == 200
-    assert captured["command"] == ["llama-server", *flags]
+    assert "-c" in captured["command"] and "65536" in captured["command"]
+    assert "--host" in captured["command"]

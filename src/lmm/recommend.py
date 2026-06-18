@@ -47,10 +47,44 @@ class LaunchConfig:
     model_path: str
     context: int
     cache_type: str
-    flags: list[str]
+    flags: list[str]                  # full launch argv flags (plumbing + tuning), for CLI/spawn
     estimate: MemoryEstimate
     fit: FitResult
     warnings: list[str] = field(default_factory=list)
+    tuning_flags: list[str] = field(default_factory=list)  # editable knobs only (no host/port/key/model/alias)
+
+
+def plumbing_flags(model_path: str, *, host: str, port: int,
+                   alias: str | None = None, api_key: str | None = None) -> list[str]:
+    """Deployment flags the daemon OWNS and derives from its own config — never
+    user-editable. --host must match the daemon's bind, --api-key/--port are
+    daemon-managed, -m/--alias are the model identity. Kept out of the tuning set
+    so the UI can't (and the recommend default can't) set them wrong."""
+    flags = ["-m", model_path]
+    if api_key:
+        flags += ["--api-key", api_key]
+    flags += ["--host", host, "--port", str(port)]
+    if alias:
+        flags += ["--alias", alias]
+    return flags
+
+
+def _tuning_groups(model: Model, hardware: HardwareInfo, context: int,
+                   cache_type: str) -> list[list[str]]:
+    """The editable performance knobs: GPU layers, flash-attention, KV-cache type,
+    speculative decoding, threads, context."""
+    groups: list[list[str]] = []
+    if hardware.has_metal:
+        groups.append(["-ngl", "999"])
+    groups.append(["-fa", "on"])
+    groups.append(["--cache-type-k", cache_type])
+    groups.append(["--cache-type-v", cache_type])
+    if model.has_mtp:
+        groups.append(["--spec-type", "draft-mtp"])
+        groups.append(["--spec-draft-n-max", "2"])
+    groups.append(["-t", str(hardware.perf_cores)])
+    groups.append(["-c", str(context)])
+    return groups
 
 
 def recommend_config(model: Model, metadata: dict, hardware: HardwareInfo, *,
@@ -69,33 +103,20 @@ def recommend_config(model: Model, metadata: dict, hardware: HardwareInfo, *,
     estimate = estimate_memory(model.arch, metadata, model.shards, context, cache_type)
     fit = assess_fit(estimate.total_bytes, weights, hardware.usable_ram_bytes)
 
-    groups: list[list[str]] = [["-m", str(model.path)]]
-    if hardware.has_metal:
-        groups.append(["-ngl", "999"])
-    groups.append(["-fa", "on"])
-    groups.append(["--cache-type-k", cache_type])
-    groups.append(["--cache-type-v", cache_type])
-    if api_key:
-        groups.append(["--api-key", api_key])
-    if model.has_mtp:
-        groups.append(["--spec-type", "draft-mtp"])
-        groups.append(["--spec-draft-n-max", "2"])
-    groups.append(["-t", str(hardware.perf_cores)])
-    groups.append(["-c", str(context)])
-    groups.append(["--host", host])
-    groups.append(["--port", str(port)])
-    if alias:
-        groups.append(["--alias", alias])
-
-    flags: list[str] = []
+    # Tuning knobs (editable; filtered against the installed llama-server).
+    tuning: list[str] = []
     warnings: list[str] = []
-    for group in groups:
-        flag = group[0]
-        if supported is not None and flag not in supported:
-            warnings.append(f"dropped unsupported flag {flag} (not in installed "
+    for group in _tuning_groups(model, hardware, context, cache_type):
+        if supported is not None and group[0] not in supported:
+            warnings.append(f"dropped unsupported flag {group[0]} (not in installed "
                             f"llama-server)")
             continue
-        flags.extend(group)
+        tuning.extend(group)
+
+    # Plumbing (daemon-owned) + tuning = the full launch flags.
+    plumbing = plumbing_flags(str(model.path), host=host, port=port,
+                              alias=alias, api_key=api_key)
     return LaunchConfig(model_path=str(model.path), context=context,
-                        cache_type=cache_type, flags=flags, estimate=estimate,
-                        fit=fit, warnings=warnings)
+                        cache_type=cache_type, flags=plumbing + tuning,
+                        tuning_flags=tuning, estimate=estimate, fit=fit,
+                        warnings=warnings)

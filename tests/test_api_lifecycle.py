@@ -15,7 +15,7 @@ def _client(monkeypatch, tmp_path):
     monkeypatch.setenv("LMM_STATE_DIR", str(tmp_path / "state"))
     cfg = DaemonConfig(host="127.0.0.1", port=8770, token="t", roots=[str(tmp_path)])
 
-    def builder(model_name, port):
+    def builder(model_name, port, tuning=None):
         return [sys.executable, str(FAKE), "--port", str(port)], f"/m/{model_name}"
 
     return TestClient(create_app(cfg, command_builder=builder))

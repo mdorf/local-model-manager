@@ -93,6 +93,19 @@ def test_recommend_includes_core_flags_and_mtp(tmp_path):
     assert cfg.fit.level in ("comfortable", "tight", "wont_load")
 
 
+def test_recommend_splits_tuning_from_plumbing(tmp_path):
+    m = _model(tmp_path, has_mtp=True, size_bytes=1000)
+    cfg = recommend_config(m, _META, _hw(64), supported=_SUPPORTED,
+                           host="0.0.0.0", port=8080, alias="m", api_key="K")
+    # tuning_flags = editable knobs only, no deployment plumbing
+    assert "-c" in cfg.tuning_flags and "-ngl" in cfg.tuning_flags
+    for plumb in ("--host", "--port", "--api-key", "-m", "--alias"):
+        assert plumb not in cfg.tuning_flags
+    # full flags carry the plumbing (for the local CLI / spawn)
+    assert "--host" in cfg.flags and "0.0.0.0" in cfg.flags
+    assert "-m" in cfg.flags and "--api-key" in cfg.flags
+
+
 def test_recommend_omits_mtp_when_model_lacks_head(tmp_path):
     m = _model(tmp_path, has_mtp=False, size_bytes=1000)
     cfg = recommend_config(m, _META, _hw(64), supported=_SUPPORTED)

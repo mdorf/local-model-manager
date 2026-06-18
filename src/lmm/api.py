@@ -22,7 +22,7 @@ from lmm.llama import get_supported_flags
 from lmm.logtail import read_log_tail, tail_new_lines
 from lmm.models import Model
 from lmm.net import is_loopback
-from lmm.recommend import recommend_config
+from lmm.recommend import plumbing_flags, recommend_config
 from lmm.server import ServerInstance, ServerManager
 from lmm.state import state_dir
 
@@ -76,31 +76,26 @@ def _instance_dict(inst: ServerInstance) -> dict:
             "started_at": inst.started_at, "flags": flags}
 
 
-def _override_command(flags: list[str]) -> tuple[list[str], str]:
-    """Build a llama-server command from a user-supplied flag list (an override of
-    the recommended config). model_path is the value after -m, for the instance record."""
-    model_path = ""
-    if "-m" in flags:
-        i = flags.index("-m")
-        if i + 1 < len(flags):
-            model_path = flags[i + 1]
-    return ["llama-server", *flags], model_path
-
-
 def _default_command_builder(config: DaemonConfig):
-    def build(model_name: str, port: int):
+    def build(model_name: str, port: int, tuning: list[str] | None = None):
+        """Compose the launch command: daemon-owned plumbing + tuning knobs.
+        `tuning` is the user's editable-flag override; None = use the recommended
+        tuning. The plumbing (-m/--host/--port/--alias/--api-key) ALWAYS comes from
+        the daemon's config, so a stale/edited host can't reach llama-server."""
         for m in discover_models(config.roots):
             if m.matches(model_name):
-                metadata = read_gguf(m.shards[0]).metadata
-                # bind the inference server to the daemon's host; enforce an
-                # api-key only when that's LAN-exposed (loopback = local-only,
-                # no key — so llama-server's own UI works without one).
+                if tuning is None:
+                    metadata = read_gguf(m.shards[0]).metadata
+                    tuning = recommend_config(
+                        m, metadata, detect_hardware(),
+                        supported=get_supported_flags() or None).tuning_flags
+                # bind to the daemon's host; add an api-key only when LAN-exposed
+                # (loopback = local-only, no key — llama-server's own UI stays open).
                 lan = not is_loopback(config.host)
-                cfg = recommend_config(m, metadata, detect_hardware(),
-                                       supported=get_supported_flags() or None,
-                                       host=config.host, port=port, alias=m.path.stem,
-                                       api_key=config.inference_key if lan else None)
-                return ["llama-server", *cfg.flags], str(m.path)
+                plumbing = plumbing_flags(str(m.path), host=config.host, port=port,
+                                          alias=m.path.stem,
+                                          api_key=config.inference_key if lan else None)
+                return ["llama-server", *plumbing, *tuning], str(m.path)
         raise HTTPException(status_code=404, detail="model not found")
     return build
 
@@ -158,18 +153,14 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
         if model is None:
             raise HTTPException(status_code=404, detail="model not found")
         metadata = read_gguf(model.shards[0]).metadata
-        # Match what the daemon will actually launch (see _default_command_builder):
-        # bind to the daemon's host, add the inference api-key when LAN-exposed.
-        # Otherwise the editable/override flags would carry --host 127.0.0.1 and the
-        # model would launch on loopback even though the daemon is LAN-bound.
-        # 8080 = the default model-server port (config.port is the daemon control port).
-        lan = not is_loopback(config.host)
+        # Return only the editable TUNING flags. The daemon owns and derives the
+        # plumbing (-m/--host/--port/--alias/--api-key) from its own config at launch,
+        # so it's never exposed for editing — a user (or a stale default) can't make
+        # the model bind the wrong host.
         cfg = recommend_config(model, metadata, detect_hardware(),
-                               supported=get_supported_flags() or None,
-                               host=config.host, port=8080, alias=model.path.stem,
-                               api_key=config.inference_key if lan else None)
+                               supported=get_supported_flags() or None)
         return {"model": model.path.name, "context": cfg.context,
-                "cache_type": cfg.cache_type, "flags": cfg.flags,
+                "cache_type": cfg.cache_type, "flags": cfg.tuning_flags,
                 "warnings": cfg.warnings,
                 "fit": {"level": cfg.fit.level, "fits": cfg.fit.fits,
                         "message": cfg.fit.message}}
@@ -177,10 +168,9 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
     @app.post("/api/servers", dependencies=[Depends(auth)])
     def start_server(body: StartServerRequest):
         port = body.port or 8080
-        if body.flags:  # user override of the recommended config (fit-check bypassed)
-            command, model_path = _override_command(body.flags)
-        else:
-            command, model_path = app.state.command_builder(body.model, port)
+        # body.flags = the user's edited TUNING flags (None = use recommended); the
+        # daemon always supplies the plumbing, so the host/key can't be overridden.
+        command, model_path = app.state.command_builder(body.model, port, body.flags)
         try:
             with app.state.lock:
                 inst = app.state.manager.start(command, port=port, model_path=model_path)
@@ -197,10 +187,8 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
     @app.post("/api/servers/switch", dependencies=[Depends(auth)])
     def switch_server(body: SwitchServerRequest):
         port = body.port or 8080
-        if body.flags:  # user override of the recommended config (fit-check bypassed)
-            command, model_path = _override_command(body.flags)
-        else:
-            command, model_path = app.state.command_builder(body.model, port)
+        # body.flags = edited TUNING flags (None = recommended); plumbing is daemon-owned.
+        command, model_path = app.state.command_builder(body.model, port, body.flags)
         try:
             with app.state.lock:
                 inst = app.state.manager.switch(command, port=port, model_path=model_path)

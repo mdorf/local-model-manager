@@ -513,12 +513,12 @@ async function openServer(url) {
     overlay.querySelector("#btn-open-reveal").textContent = inp.type === "password" ? "Reveal" : "Hide";
   };
   overlay.querySelector("#btn-open-copy").onclick = () => {
-    navigator.clipboard.writeText(key).catch(() => {});
+    copyToClipboard(key);
     overlay.querySelector("#btn-open-copy").textContent = "Copied!";
     setTimeout(() => { overlay.querySelector("#btn-open-copy").textContent = "Copy"; }, 1500);
   };
   overlay.querySelector("#btn-open-go").onclick = () => {
-    navigator.clipboard.writeText(key).catch(() => {});  // copy on open too, for convenience
+    copyToClipboard(key);  // copy on open too, for convenience
     window.open(url, "_blank", "noopener");
     close();
   };
@@ -610,14 +610,14 @@ async function showConnect() {
       overlay.querySelector("#btn-reveal").textContent = inp.type === "password" ? "Reveal" : "Hide";
     };
     overlay.querySelector("#btn-copy-key").onclick = () => {
-      navigator.clipboard.writeText(info.inference_key || "").catch(() => {});
+      copyToClipboard(info.inference_key || "");
       overlay.querySelector("#btn-copy-key").textContent = "Copied!";
       setTimeout(() => { overlay.querySelector("#btn-copy-key").textContent = "Copy"; }, 1500);
     };
   }
 
   overlay.querySelector("#btn-copy-cmd").onclick = () => {
-    navigator.clipboard.writeText(bindCmd).catch(() => {});
+    copyToClipboard(bindCmd);
     overlay.querySelector("#btn-copy-cmd").textContent = "Copied!";
     setTimeout(() => { overlay.querySelector("#btn-copy-cmd").textContent = "Copy command"; }, 1500);
   };
@@ -744,6 +744,37 @@ function esc(s) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+// Copies text to the clipboard, surviving insecure contexts. navigator.clipboard
+// only exists over HTTPS or on localhost — over plain HTTP on a LAN IP (how the
+// UI is reached from another machine) it's UNDEFINED, so `navigator.clipboard.
+// writeText(...)` throws synchronously (a `.catch` can't help). We feature-detect
+// and fall back to the legacy execCommand path. Best-effort: never throws, so
+// callers (e.g. the Open-server button) keep working even if the copy fails.
+function copyToClipboard(text) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(() => legacyCopy(text));
+      return;
+    }
+  } catch (e) { /* fall through to legacy */ }
+  legacyCopy(text);
+}
+
+function legacyCopy(text) {
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.top = "-1000px";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+  } catch (e) { /* give up silently — the value is still shown for manual copy */ }
 }
 
 // ── Entry point ───────────────────────────────────────────────────────

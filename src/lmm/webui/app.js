@@ -225,7 +225,7 @@ function renderDetail() {
   if (isLive) {
     // The running model is the only state where an agent can be connected.
     const connectLabel = isBound
-      ? `✓ Connected: ${esc(boundProfilesLabel(boundProfiles))}`
+      ? `✓ Hermes connected: ${esc(boundProfilesLabel(boundProfiles))}`
       : "Connect an agent…";
     const connectTitle = isBound
       ? `Hermes profiles pointed at this server: ${esc(boundProfiles.join(", "))} — click to manage`

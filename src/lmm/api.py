@@ -19,6 +19,7 @@ from lmm.gguf import read_gguf
 from lmm.hardware import detect_hardware
 from lmm.hermes import bind as hermes_bind
 from lmm.hermes import list_profiles as hermes_list_profiles
+from lmm.hermes import profiles_bound_to as hermes_profiles_bound_to
 from lmm.llama import get_supported_flags
 from lmm.logtail import read_log_tail, tail_new_lines
 from lmm.models import Model
@@ -245,28 +246,17 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
 
     @app.get("/api/bind-status", dependencies=[Depends(auth)])
     def bind_status():
-        # Is the server host's Hermes (active config) pointed at the running model?
-        # Token-gated; readable over the LAN so the badge works there too.
+        # Which of the server host's Hermes profiles point at the running model
+        # server? Token-gated; readable over the LAN so the badge works there too.
+        # Connection is base_url/port-based (not model.default) — see hermes
+        # helpers — so it stays accurate across model switches.
         running = app.state.manager.list()  # records: no health probe (fast)
         inst = running[0] if running else None
-        cfg_path = Path.home() / ".hermes" / "config.yaml"
-        if inst is None or not cfg_path.exists():
-            return {"bound": False, "model_id": None}
-        base = f"http://127.0.0.1:{inst.port}/v1"
-        try:
-            from ruamel.yaml import YAML
-            data = YAML().load(cfg_path.read_text()) or {}
-        except Exception:
-            return {"bound": False, "model_id": None}
-        model = data.get("model") or {}
-        # "Bound" means Hermes points at the model that is running RIGHT NOW —
-        # match both the URL/port and the model id. After a switch the URL still
-        # matches but the config names the old model, so this correctly reports
-        # unbound (a stale binding), prompting a re-bind.
-        running_id = Path(inst.model_path).stem
-        is_bound = model.get("base_url") == base and model.get("default") == running_id
-        return {"bound": bool(is_bound),
-                "model_id": model.get("default") if is_bound else None}
+        if inst is None:
+            return {"bound": False, "profiles": [], "model_id": None}
+        profiles = hermes_profiles_bound_to(inst.port)
+        return {"bound": bool(profiles), "profiles": profiles,
+                "model_id": Path(inst.model_path).stem}
 
     SUBPROTO_PREFIX = "lmm.bearer."
 

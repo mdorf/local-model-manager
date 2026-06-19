@@ -1,4 +1,36 @@
-from lmm.hermes import list_profiles, profile_config_path
+from lmm.hermes import list_profiles, profile_config_path, profiles_bound_to
+
+
+def _hermes(tmp_path):
+    hd = tmp_path / ".hermes"
+    (hd / "profiles" / "qwen-herm").mkdir(parents=True)
+    (hd / "profiles" / "kimi-herm").mkdir(parents=True)
+    return hd
+
+
+def test_profiles_bound_to_reports_only_local_ones(tmp_path):
+    hd = _hermes(tmp_path)
+    # default → cloud (not connected)
+    (hd / "config.yaml").write_text(
+        "model:\n  provider: openrouter\n  base_url: https://openrouter.ai/api/v1\n")
+    # qwen-herm → local via custom provider on :8080 (CONNECTED)
+    (hd / "profiles" / "qwen-herm" / "config.yaml").write_text(
+        "model:\n  provider: custom:local\n  default: stale-old-name\n"
+        "providers:\n  local:\n    base_url: http://127.0.0.1:8080/v1\n")
+    # kimi-herm → local but a DIFFERENT port (not connected to :8080)
+    (hd / "profiles" / "kimi-herm" / "config.yaml").write_text(
+        "model:\n  provider: custom:local\n  base_url: http://127.0.0.1:9999/v1\n")
+
+    assert profiles_bound_to(8080, hd) == ["qwen-herm"]
+
+
+def test_profiles_bound_to_matches_by_url_not_model_label(tmp_path):
+    # A stale model.default must NOT exclude a profile that still points at :8080
+    # (llama-server ignores the model field). Detection is base_url/port-based.
+    hd = _hermes(tmp_path)
+    (hd / "config.yaml").write_text(
+        "model:\n  provider: custom:local\n  default: WHATEVER\n  base_url: http://localhost:8080/v1\n")
+    assert "default" in profiles_bound_to(8080, hd)
 
 
 def test_profile_config_path_resolution(tmp_path):

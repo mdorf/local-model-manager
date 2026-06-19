@@ -68,8 +68,9 @@ function renderTopbar() {
     // Reach the model server via the same host the UI is served from (works
     // locally and over the LAN), on the running server's port.
     const openUrl = `${location.protocol}//${location.hostname}:${running.port}/`;
-    const boundBadge = bound.bound
-      ? `<span class="badge" title="Your Hermes is pointed at this server">✓ Hermes bound</span>`
+    const badgeProfiles = bound.profiles || [];
+    const boundBadge = badgeProfiles.length
+      ? `<span class="badge" title="Hermes profiles pointed at this server: ${esc(badgeProfiles.join(", "))}">✓ Hermes: ${esc(boundProfilesLabel(badgeProfiles))}</span>`
       : "";
     statusHtml = `
       <span class="status-label">running:</span>
@@ -207,7 +208,8 @@ function renderDetail() {
   const runningServer = servers[0];
   const anyRunning = !!runningServer;
   const isLive = anyRunning && runningServer.model === rec.model;  // this model is the running one
-  const isBound = isLive && bound.bound;  // bound ⇒ Hermes points at the running model (#2)
+  const boundProfiles = isLive ? (bound.profiles || []) : [];
+  const isBound = boundProfiles.length > 0;  // ≥1 Hermes profile points at the running server
   // What the running server was ACTUALLY launched with (read-only; covers adopted
   // servers too). Shown only for the live model, distinct from the editable
   // "Recommended launch" flags above.
@@ -222,9 +224,11 @@ function renderDetail() {
   let actionsHtml;
   if (isLive) {
     // The running model is the only state where an agent can be connected.
-    const connectLabel = isBound ? "✓ Connected to Hermes" : "Connect an agent…";
+    const connectLabel = isBound
+      ? `✓ Connected: ${esc(boundProfilesLabel(boundProfiles))}`
+      : "Connect an agent…";
     const connectTitle = isBound
-      ? "Hermes is pointed at this model — click to re-bind"
+      ? `Hermes profiles pointed at this server: ${esc(boundProfiles.join(", "))} — click to manage`
       : "Bind Hermes (or any OpenAI-compatible app) to this running model";
     // Keep the launch action first and Connect second, matching the non-live
     // layout ([Start/Switch] [Connect]) so the buttons don't jump between states.
@@ -776,6 +780,13 @@ function handleError(e) {
 }
 
 // ── HTML escape ───────────────────────────────────────────────────────
+// Compact label for the connected Hermes profiles: "qwen-herm",
+// "qwen-herm, default", or "3 profiles" (full list goes in the title tooltip).
+function boundProfilesLabel(profs) {
+  if (!profs || !profs.length) return "";
+  return profs.length <= 2 ? profs.join(", ") : `${profs.length} profiles`;
+}
+
 function esc(s) {
   return String(s ?? "")
     .replace(/&/g, "&amp;")

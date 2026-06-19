@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import io
 from pathlib import Path
+from urllib.parse import urlparse
 
 from ruamel.yaml import YAML
 
 DEFAULT_HERMES_CONFIG = Path.home() / ".hermes" / "config.yaml"
 _BACKUP_SUFFIX = ".lmm-prev"
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 def _yaml() -> YAML:
@@ -46,6 +48,44 @@ def list_profiles(hermes_dir: str | Path | None = None) -> list[dict]:
             if cfg.is_file():
                 profiles.append({"name": d.name, "path": str(cfg)})
     return profiles
+
+
+def _points_at_local_server(data: dict, port: int) -> bool:
+    """Does this Hermes config's ACTIVE provider point at the local model server
+    on `port`? Resolves model.provider=custom:<name> → providers[<name>].base_url
+    (Hermes's real lookup), falling back to model.base_url. 'Connected' = host is
+    loopback + port matches — NOT model.default (llama-server ignores the request
+    model id, so a profile keeps working across switches even if its label is
+    stale)."""
+    model = data.get("model") or {}
+    base = model.get("base_url")
+    prov = str(model.get("provider") or "")
+    if prov.startswith("custom:"):
+        name = prov.split(":", 1)[1]
+        entry = (data.get("providers") or {}).get(name) or {}
+        base = entry.get("base_url") or base
+    if not base:
+        return False
+    try:
+        u = urlparse(str(base))
+    except ValueError:
+        return False
+    return u.port == port and u.hostname in _LOCAL_HOSTS
+
+
+def profiles_bound_to(port: int, hermes_dir: str | Path | None = None) -> list[str]:
+    """Names of the operator's Hermes profiles currently pointed at the local model
+    server on `port` (see _points_at_local_server). Used by the UI to say WHICH
+    profiles are connected, not just whether one is."""
+    out: list[str] = []
+    for prof in list_profiles(hermes_dir):
+        try:
+            data = _yaml().load(Path(prof["path"]).read_text()) or {}
+        except Exception:
+            continue
+        if _points_at_local_server(data, port):
+            out.append(prof["name"])
+    return out
 
 
 def bind(config_path: str | Path, *, base_url: str, model_id: str,

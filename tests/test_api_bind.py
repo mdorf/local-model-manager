@@ -87,9 +87,10 @@ def test_bind_status_false_when_url_differs(tmp_path, monkeypatch):
     assert c.get("/api/bind-status", headers=H).json()["bound"] is False
 
 
-def test_bind_status_false_when_model_differs(tmp_path, monkeypatch):
+def test_bind_status_url_match_ignores_stale_model_label(tmp_path, monkeypatch):
     # The switch scenario: same port/base_url, but Hermes still names the OLD
-    # model. The badge must NOT claim "bound" — the config is stale.
+    # model. Since llama-server ignores the request model id, the profile STILL
+    # works — so it's reported connected (URL/port-based, not model.default).
     hermes = tmp_path / ".hermes"
     hermes.mkdir()
     (hermes / "config.yaml").write_text(
@@ -99,7 +100,7 @@ def test_bind_status_false_when_model_differs(tmp_path, monkeypatch):
     app = _app(FakeManager([_running()]))  # running model id == Qwen3.6-27B-Q8_0
     c = TestClient(app, client=("127.0.0.1", 12345))
     b = c.get("/api/bind-status", headers=H).json()
-    assert b["bound"] is False and b["model_id"] is None
+    assert b["bound"] is True and b["profiles"] == ["default"]
 
 
 def test_bind_status_works_over_lan():

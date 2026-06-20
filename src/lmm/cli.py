@@ -226,8 +226,13 @@ def cmd_bind(args: argparse.Namespace) -> int:
             return 1
     base_url = f"http://{args.host}:{args.port}/v1"
     api_key = args.api_key or load_or_create_config().inference_key
+    # Pin Hermes's context window to the server's actual -c (read from /v1/models
+    # meta.n_ctx); Hermes can't otherwise see a local server's runtime context.
+    from lmm.health import served_context_length
+    context_length = served_context_length(f"http://{args.host}:{args.port}")
     info = hermes_bind(config_path, base_url=base_url, model_id=model_id,
-                       provider_name=args.provider_name, api_key=api_key)
+                       provider_name=args.provider_name, api_key=api_key,
+                       context_length=context_length)
     print(f"Bound {config_path} -> {info['provider']} / {info['model']} @ {info['base_url']}")
     print("note: reasoning models (e.g. Qwen3.6) need a generous max_tokens — "
           "set it in your Hermes client if replies come back empty.")

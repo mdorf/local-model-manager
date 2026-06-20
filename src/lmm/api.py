@@ -25,7 +25,7 @@ from lmm.logtail import read_log_tail, tail_new_lines
 from lmm.models import Model
 from lmm.net import is_loopback
 from lmm.recommend import plumbing_flags, recommend_config
-from lmm.server import ServerInstance, ServerManager
+from lmm.server import ServerInstance, ServerManager, context_length_from_command
 from lmm.state import state_dir
 
 
@@ -230,12 +230,16 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
         base_url = f"http://127.0.0.1:{inst.port}/v1"
         lan = not is_loopback(config.host)
         api_key = config.inference_key if lan else "local"  # keyless server ignores it
+        # Pin Hermes's context window to the server's actual -c (Hermes can't read
+        # it from /v1/models). Pulled from the launch command — no extra probe.
+        context_length = context_length_from_command(inst.command)
         config_path = (Path(body.hermes_config) if body.hermes_config
                        else Path.home() / ".hermes" / "config.yaml")
         if not config_path.exists():
             raise HTTPException(status_code=404, detail=f"Hermes config not found: {config_path}")
         info = hermes_bind(config_path, base_url=base_url, model_id=model_id,
-                           provider_name=body.provider_name, api_key=api_key)
+                           provider_name=body.provider_name, api_key=api_key,
+                           context_length=context_length)
         return {"bound": True, **info}
 
     @app.get("/api/hermes-profiles", dependencies=[Depends(auth)])

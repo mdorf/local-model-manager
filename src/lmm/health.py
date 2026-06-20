@@ -35,6 +35,22 @@ def served_model_id(base_url: str, timeout: float = 3.0) -> str | None:
     return models[0].get("id") if models else None
 
 
+def served_context_length(base_url: str, timeout: float = 3.0) -> int | None:
+    """The runtime context window (`-c`) a llama.cpp server is serving, read from
+    /v1/models `data[0].meta.n_ctx`, or None if unavailable. This is the value to
+    pin into Hermes's `model.context_length` (Hermes can't otherwise see it)."""
+    url = base_url.rstrip("/") + "/v1/models"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            data = json.loads(resp.read() or "{}")
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    models = data.get("data") or []
+    meta = models[0].get("meta") if models and isinstance(models[0], dict) else None
+    n_ctx = meta.get("n_ctx") if isinstance(meta, dict) else None
+    return n_ctx if isinstance(n_ctx, int) and n_ctx > 0 else None
+
+
 def wait_for_health(base_url: str, timeout: float = 120.0, interval: float = 0.5) -> bool:
     """Poll /health until it returns 200 or the timeout elapses."""
     deadline = time.monotonic() + timeout

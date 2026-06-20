@@ -14,6 +14,21 @@ from lmm.process import pid_alive, process_argv, spawn, stop_proc, terminate_pid
 from lmm.state import InstanceRecord, load_instances, mutate_instances, state_dir
 
 
+def context_length_from_command(command: list[str] | None) -> int | None:
+    """Pull the `-c` (context window) value out of a llama-server command, if
+    present and numeric. Used to pin Hermes's model.context_length to the real
+    running window at bind time."""
+    if not command or "-c" not in command:
+        return None
+    i = command.index("-c")
+    if i + 1 < len(command):
+        try:
+            return int(command[i + 1])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 def _api_key_from_command(command: list[str]) -> str | None:
     """Pull the value of `--api-key` out of a llama-server command, if present."""
     if "--api-key" in command:

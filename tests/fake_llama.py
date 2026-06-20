@@ -30,7 +30,9 @@ def _make_handler(start: float, ready_after: float):
                 self._send(200 if ready else 503,
                            {"status": "ok" if ready else "loading"})
             elif self.path == "/v1/models":
-                self._send(200, {"data": [{"id": "fake"}]})
+                # real llama.cpp reports the runtime context under data[].meta.n_ctx
+                self._send(200, {"data": [{"id": "fake",
+                          "meta": {"n_ctx": 4096, "n_ctx_train": 8192}}]})
             else:
                 self._send(404, {})
 

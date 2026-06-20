@@ -89,9 +89,15 @@ def profiles_bound_to(port: int, hermes_dir: str | Path | None = None) -> list[s
 
 
 def bind(config_path: str | Path, *, base_url: str, model_id: str,
-         provider_name: str = "local", api_key: str = "local") -> dict:
+         provider_name: str = "local", api_key: str = "local",
+         context_length: int | None = None) -> dict:
     """Point a Hermes config at a local server. Preserves comments/other keys;
     writes a <config>.lmm-prev backup before editing.
+
+    When ``context_length`` is given it's written as ``model.context_length`` —
+    Hermes can't reliably read a local llama.cpp server's runtime ``-c`` (it
+    name-guesses or falls back to the trained max), so pinning the real window
+    makes Hermes compress/size at the correct threshold.
     """
     config_path = Path(config_path)
     original = config_path.read_text()
@@ -114,13 +120,16 @@ def bind(config_path: str | Path, *, base_url: str, model_id: str,
     model["provider"] = f"custom:{provider_name}"
     model["default"] = model_id
     model["base_url"] = base_url
+    if isinstance(context_length, int) and context_length > 0:
+        model["context_length"] = context_length
     data["model"] = model
 
     buf = io.StringIO()
     yaml.dump(data, buf)
     config_path.write_text(buf.getvalue())
     return {"provider": f"custom:{provider_name}", "model": model_id,
-            "base_url": base_url, "config": str(config_path)}
+            "base_url": base_url, "context_length": context_length,
+            "config": str(config_path)}
 
 
 def unbind(config_path: str | Path) -> bool:
@@ -148,7 +157,7 @@ def unbind(config_path: str | Path) -> bool:
         ref = model.get("provider")
         name = (ref.split(":", 1)[1]
                 if isinstance(ref, str) and ref.startswith("custom:") else "local")
-        for key in ("provider", "default", "base_url"):
+        for key in ("provider", "default", "base_url", "context_length"):
             if key in prev_model:
                 model[key] = prev_model[key]
             else:

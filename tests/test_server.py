@@ -32,6 +32,29 @@ def test_start_reaches_ready_and_persists(mgr):
         mgr.stop(port)
 
 
+def test_served_context_length_reads_meta_n_ctx(mgr):
+    from lmm.health import served_context_length
+    port = pick_free_port(start=49960)
+    mgr.start(_fake_cmd(port), port=port, model_path="/m/x.gguf", ready_timeout=10.0)
+    try:
+        assert served_context_length(f"http://127.0.0.1:{port}") == 4096
+    finally:
+        mgr.stop(port)
+
+
+def test_served_context_length_none_when_unreachable():
+    from lmm.health import served_context_length
+    assert served_context_length("http://127.0.0.1:1") is None
+
+
+def test_context_length_from_command():
+    from lmm.server import context_length_from_command
+    assert context_length_from_command(
+        ["llama-server", "-m", "x.gguf", "-c", "131072", "-fa", "on"]) == 131072
+    assert context_length_from_command(["llama-server", "-fa", "on"]) is None
+    assert context_length_from_command(None) is None
+
+
 def test_start_records_launch_command(mgr):
     # the launch argv is stored (record + instance) so the UI can show "current run params"
     port = pick_free_port(start=49900)

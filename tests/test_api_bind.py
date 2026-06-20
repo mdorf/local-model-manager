@@ -55,6 +55,23 @@ def test_bind_loopback_writes_running_model(tmp_path):
     assert data["providers"]["local"]["api_key"] == "sek"
 
 
+def test_bind_writes_context_length_from_running_command(tmp_path):
+    # bind pins Hermes's model.context_length to the running server's actual -c,
+    # pulled from the instance's launch command (no extra probe).
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(_SAMPLE)
+    inst = ServerInstance(port=8080, pid=1, model_path="/m/Qwen3.6-27B-Q8_0.gguf",
+                          started_at=0.0, status="ready", external=False,
+                          command=["llama-server", "-m", "x.gguf", "-c", "131072"])
+    app = _app(FakeManager([inst]), host="0.0.0.0")
+    c = TestClient(app, client=("127.0.0.1", 1))
+    r = c.post("/api/bind", json={"hermes_config": str(cfg_file)}, headers=H)
+    assert r.status_code == 200
+    import ruamel.yaml
+    data = ruamel.yaml.YAML().load(cfg_file.read_text())
+    assert data["model"]["context_length"] == 131072
+
+
 def test_bind_no_running_server_conflict(tmp_path):
     cfg_file = tmp_path / "config.yaml"
     cfg_file.write_text(_SAMPLE)

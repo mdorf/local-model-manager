@@ -47,6 +47,18 @@ def test_unbind_restores_original(tmp_path):
     assert cfg.read_text() == _SAMPLE
 
 
+def test_unbind_reverts_context_length(tmp_path):
+    # bind adds model.context_length (the _SAMPLE has none); unbind must remove it,
+    # not leave a stale window behind.
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(_SAMPLE)
+    bind(cfg, base_url="http://127.0.0.1:8080/v1", model_id="m", context_length=131072)
+    assert _load(cfg)["model"]["context_length"] == 131072
+    assert unbind(cfg) is True
+    assert "context_length" not in _load(cfg)["model"]
+    assert cfg.read_text() == _SAMPLE
+
+
 def test_unbind_removes_backup_residue(tmp_path):
     # "complete removal": after revert, no .lmm-prev backup is left behind.
     cfg = tmp_path / "config.yaml"

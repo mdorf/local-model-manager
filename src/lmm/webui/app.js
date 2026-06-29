@@ -186,6 +186,12 @@ function renderDetail() {
   const card = meta.hf_base_repo
     ? `<a href="${esc(meta.hf_base_repo)}" target="_blank" rel="noopener">${esc(meta.hf_base_repo.replace("https://huggingface.co/", ""))} ↗</a>`
     : `<a href="https://huggingface.co/models?search=${encodeURIComponent(meta.display_name || rec.model)}" target="_blank" rel="noopener">search Hugging Face ↗</a>`;
+  // Embedded sampling defaults — CLIENT params (set in Hermes / the chat UI),
+  // not launch flags. Shown for reference. Numbers tidied (0.94999… → 0.95).
+  const fmtNum = (v) => (typeof v === "number" ? String(+v.toFixed(2)) : esc(String(v)));
+  const samplingStr = meta.sampling
+    ? Object.entries(meta.sampling).map(([k, v]) => `${esc(k)} ${fmtNum(v)}`).join(" · ")
+    : "";
   const metaHtml =
     row("Architecture", esc(meta.arch || "")) +
     row("Parameters", esc(meta.size_label || "")) +
@@ -194,6 +200,8 @@ function renderDetail() {
     row("Max context", meta.context_length ? meta.context_length.toLocaleString() + " tokens" : "") +
     (meta.has_mtp ? row("Speculative", "draft-mtp (built-in draft head)") : "") +
     (meta.has_chat_template ? row("Chat template", "embedded") : "") +
+    (samplingStr ? row("Sampling", samplingStr +
+      ` <span style="color:var(--fg-muted)">(model defaults — set in your chat client)</span>`) : "") +
     row("License", esc(meta.license || "")) +
     row("Model card", card);
 

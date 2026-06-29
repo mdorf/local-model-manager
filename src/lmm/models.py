@@ -42,6 +42,7 @@ class Model:
     quantized_by: str | None = None
     has_chat_template: bool = False
     author: str | None = None
+    sampling: dict | None = None   # embedded general.sampling.* defaults (temp/top_k/top_p)
 
     def matches(self, query: str) -> bool:
         """True if `query` names this model — by filename, full path, or stem
@@ -86,6 +87,11 @@ def classify(info: GGUFInfo, path: str | Path, *,
     block_count = md.get(f"{arch}.block_count")
     context_length = md.get(f"{arch}.context_length")
     author = (str(md["general.author"]) if md.get("general.author") else None)
+    # Embedded sampling defaults (the model author's recommended temp/top_k/top_p).
+    # These are CLIENT sampling params, not launch flags — surfaced for reference.
+    sampling = {k: md[f"general.sampling.{k}"]
+                for k in ("temp", "top_k", "top_p", "min_p")
+                if md.get(f"general.sampling.{k}") is not None} or None
     # HF model-card link: prefer an embedded repo URL (license link / base-model /
     # general repo_url); else derive <author>/<name> as a best-effort.
     hf_repo = (_hf_repo_from_link(str(md.get("general.license.link", "")))
@@ -109,4 +115,5 @@ def classify(info: GGUFInfo, path: str | Path, *,
         quantized_by=(str(md["general.quantized_by"]) if md.get("general.quantized_by") else None),
         has_chat_template=bool(md.get("tokenizer.chat_template")),
         author=author,
+        sampling=sampling,
     )

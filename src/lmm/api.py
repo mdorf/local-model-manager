@@ -64,7 +64,7 @@ def _model_dict(m: Model) -> dict:
             "context_length": m.context_length, "has_mtp": m.has_mtp,
             "hf_base_repo": m.hf_base_repo, "license": m.license,
             "quantized_by": m.quantized_by, "has_chat_template": m.has_chat_template,
-            "author": m.author, "display_name": m.name}
+            "author": m.author, "display_name": m.name, "sampling": m.sampling}
 
 
 def _instance_dict(inst: ServerInstance) -> dict:

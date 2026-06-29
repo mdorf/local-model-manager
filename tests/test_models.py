@@ -50,6 +50,22 @@ def test_classify_core_fields(qwen_like):
     assert m.family == "qwen3.6"          # basename minus size, lowercased
 
 
+def test_classify_extracts_sampling_defaults():
+    info = GGUFInfo(version=3, metadata={
+        "general.architecture": "qwen35moe",
+        "general.sampling.temp": 1.0,
+        "general.sampling.top_k": 20,
+        "general.sampling.top_p": 0.95,
+    }, tensor_names=[])
+    m = classify(info, "/tmp/x.gguf")
+    assert m.sampling == {"temp": 1.0, "top_k": 20, "top_p": 0.95}
+
+
+def test_classify_sampling_none_when_absent():
+    info = GGUFInfo(version=3, metadata={"general.architecture": "x"}, tensor_names=[])
+    assert classify(info, "/tmp/x.gguf").sampling is None
+
+
 def test_classify_detects_mtp(qwen_like):
     m = classify(read_gguf(qwen_like), qwen_like)
     assert m.has_mtp is True

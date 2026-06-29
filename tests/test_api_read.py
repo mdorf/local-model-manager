@@ -43,6 +43,25 @@ def test_list_models(tmp_path):
     assert models[0]["has_mtp"] is True
 
 
+def test_set_and_clear_model_homepage(tmp_path):
+    write_minimal_gguf(tmp_path / "Qwen3.6-27B-Q8_0.gguf", _META,
+                       ["blk.64.nextn.eh_proj.weight"])
+    c = _client(tmp_path)
+    url = "https://huggingface.co/Qwen/Qwen3.6-27B"
+    r = c.put("/api/models/Qwen3.6-27B-Q8_0.gguf/homepage", json={"url": url}, headers=_H)
+    assert r.status_code == 200 and r.json()["homepage_override"] == url
+    assert c.get("/api/models", headers=_H).json()["models"][0]["homepage_override"] == url
+    # blank clears it
+    c.put("/api/models/Qwen3.6-27B-Q8_0.gguf/homepage", json={"url": ""}, headers=_H)
+    assert c.get("/api/models", headers=_H).json()["models"][0]["homepage_override"] is None
+
+
+def test_set_homepage_unknown_model_404(tmp_path):
+    r = _client(tmp_path).put("/api/models/nope.gguf/homepage",
+                              json={"url": "https://x.co/a/b"}, headers=_H)
+    assert r.status_code == 404
+
+
 def test_recommend_endpoint(tmp_path):
     write_minimal_gguf(tmp_path / "Qwen3.6-27B-Q8_0.gguf", _META,
                        ["blk.64.nextn.eh_proj.weight"])

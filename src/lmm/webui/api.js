@@ -26,6 +26,7 @@ async function req(method, path, body) {
 export const api = {
   models: () => req("GET", "/api/models"),
   recommend: (name) => req("GET", `/api/models/${encodeURIComponent(name)}/recommend`),
+  setHomepage: (name, url) => req("PUT", `/api/models/${encodeURIComponent(name)}/homepage`, { url }),
   servers: () => req("GET", "/api/servers"),
   start: (model, port, flags) => req("POST", "/api/servers", flags ? { model, port, flags } : { model, port }),
   switch: (model, port, flags) => req("POST", "/api/servers/switch", flags ? { model, port, flags } : { model, port }),

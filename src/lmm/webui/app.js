@@ -181,11 +181,21 @@ function renderDetail() {
   const meta = models.find((x) => x.name === rec.model) || {};
   const row = (label, html) => html ? `<div class="detail-row"><span class="lbl">${label}</span><span>${html}</span></div>` : "";
   const quant = meta.quant ? esc(meta.quant) + (meta.quantized_by ? ` (by ${esc(meta.quantized_by)})` : "") : "";
-  // Direct card link when the GGUF embeds the repo; otherwise a reliable HF
-  // search for the model name (never a fabricated/guessed direct URL).
-  const card = meta.hf_base_repo
-    ? `<a href="${esc(meta.hf_base_repo)}" target="_blank" rel="noopener">${esc(meta.hf_base_repo.replace("https://huggingface.co/", ""))} ↗</a>`
-    : `<a href="https://huggingface.co/models?search=${encodeURIComponent(meta.display_name || rec.model)}" target="_blank" rel="noopener">search Hugging Face ↗</a>`;
+  // Card link priority: user override → GGUF-embedded repo → HF search (never a
+  // fabricated direct URL). A pencil lets you set/clear a homepage for models
+  // whose metadata is too sparse to derive the repo (e.g. no author).
+  const homepage = meta.homepage_override || meta.hf_base_repo;
+  const cardText = homepage
+    ? esc(homepage.replace("https://huggingface.co/", "").replace(/^https?:\/\//, "")) + " ↗"
+    : "search Hugging Face ↗";
+  const cardHref = homepage
+    || `https://huggingface.co/models?search=${encodeURIComponent(meta.display_name || rec.model)}`;
+  const card =
+    `<a href="${esc(cardHref)}" target="_blank" rel="noopener">${cardText}</a>` +
+    (meta.homepage_override ? ` <span style="color:var(--fg-muted);font-size:11px">(custom)</span>` : "") +
+    ` <a id="edit-homepage" title="Set a custom homepage URL for this model"` +
+    ` data-name="${esc(meta.name || rec.model)}" data-current="${esc(meta.homepage_override || "")}"` +
+    ` style="cursor:pointer;color:var(--accent);font-size:12px;text-decoration:none">✎</a>`;
   // Embedded sampling defaults — CLIENT params (set in Hermes / the chat UI),
   // not launch flags. Shown for reference. Numbers tidied (0.94999… → 0.95).
   const fmtNum = (v) => (typeof v === "number" ? String(+v.toFixed(2)) : esc(String(v)));
@@ -346,6 +356,22 @@ function wireEvents() {
   // Connect-an-agent button (detail pane, enabled only for the running model)
   const connectBtn = root.querySelector("#btn-connect");
   if (connectBtn) connectBtn.onclick = showConnect;
+  // Edit the model-card homepage (for sparse-metadata models). Detail-pane only,
+  // rebuilt on full paint — no rewire needed for the partial status update.
+  const editHp = root.querySelector("#edit-homepage");
+  if (editHp) editHp.onclick = async () => {
+    const url = prompt(
+      "Model homepage URL (e.g. https://huggingface.co/org/repo).\nLeave blank to clear:",
+      editHp.dataset.current || "");
+    if (url === null) return;  // cancelled
+    try {
+      await api.setHomepage(editHp.dataset.name, url.trim());
+      await refresh();
+      paint();
+    } catch (e) {
+      showBanner(e && e.message ? "Couldn't save homepage: " + e.message : "Couldn't save homepage");
+    }
+  };
   // Clear the log view (visual only — see clearLogs). The drawer survives the
   // partial status update, so wiring it on full paint is enough.
   const clearBtn = root.querySelector("#btn-clear-logs");

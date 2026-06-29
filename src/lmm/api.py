@@ -26,7 +26,7 @@ from lmm.models import Model
 from lmm.net import is_loopback
 from lmm.recommend import plumbing_flags, recommend_config
 from lmm.server import ServerInstance, ServerManager, context_length_from_command
-from lmm.state import state_dir
+from lmm.state import load_homepages, set_homepage as state_set_homepage, state_dir
 
 
 _WEBUI_DIR = Path(__file__).parent / "webui"
@@ -55,16 +55,21 @@ class BindRequest(BaseModel):
     hermes_config: str | None = None  # default: the daemon user's ~/.hermes/config.yaml
 
 
+class HomepageRequest(BaseModel):
+    url: str | None = None  # blank/None clears the override
+
+
 _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
-def _model_dict(m: Model) -> dict:
+def _model_dict(m: Model, homepage_override: str | None = None) -> dict:
     return {"name": m.path.name, "path": str(m.path), "arch": m.arch,
             "family": m.family, "size_label": m.size_label, "quant": m.quant,
             "context_length": m.context_length, "has_mtp": m.has_mtp,
             "hf_base_repo": m.hf_base_repo, "license": m.license,
             "quantized_by": m.quantized_by, "has_chat_template": m.has_chat_template,
-            "author": m.author, "display_name": m.name, "sampling": m.sampling}
+            "author": m.author, "display_name": m.name, "sampling": m.sampling,
+            "homepage_override": homepage_override}
 
 
 def _instance_dict(inst: ServerInstance) -> dict:
@@ -147,7 +152,20 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
 
     @app.get("/api/models", dependencies=[Depends(auth)])
     def list_models():
-        return {"models": [_model_dict(m) for m in discover_models(config.roots)]}
+        overrides = load_homepages()
+        return {"models": [_model_dict(m, overrides.get(m.path.name))
+                           for m in discover_models(config.roots)]}
+
+    @app.put("/api/models/{name}/homepage", dependencies=[Depends(auth)])
+    def set_homepage(name: str, body: HomepageRequest):
+        # User-set model-card link for GGUFs whose metadata can't derive the repo.
+        # Token-gated; resolved by filename. Blank url clears it.
+        model = _find(name)
+        if model is None:
+            raise HTTPException(status_code=404, detail="model not found")
+        state_set_homepage(model.path.name, body.url)
+        return {"name": model.path.name,
+                "homepage_override": load_homepages().get(model.path.name)}
 
     @app.get("/api/models/{name}/recommend", dependencies=[Depends(auth)])
     def recommend_for(name: str):

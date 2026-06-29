@@ -65,6 +65,36 @@ def save_instances(records: list[InstanceRecord]) -> None:
     tmp.replace(path)  # atomic
 
 
+def _homepages_file() -> Path:
+    return state_dir() / "model_homepages.json"
+
+
+def load_homepages() -> dict[str, str]:
+    """User-set HF/homepage URL overrides, keyed by model filename. Used when a
+    GGUF's metadata is too sparse to derive the real repo (no author/repo URL)."""
+    try:
+        raw = json.loads(_homepages_file().read_text())
+    except (OSError, ValueError):
+        return {}
+    return {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
+
+
+def set_homepage(name: str, url: str | None) -> None:
+    """Set (or, for a blank/None url, clear) the homepage override for `name`.
+    Only http(s) URLs are stored — anything else is treated as a clear."""
+    overrides = load_homepages()
+    clean = (url or "").strip()
+    if clean.startswith("http://") or clean.startswith("https://"):
+        overrides[name] = clean
+    else:
+        overrides.pop(name, None)
+    path = _homepages_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(overrides, indent=2))
+    tmp.replace(path)  # atomic
+
+
 def _lock_file() -> Path:
     return state_dir() / "instances.lock"
 

@@ -132,7 +132,10 @@ def create_app(config: DaemonConfig, manager: ServerManager | None = None,
         # UI assets must revalidate so a reinstall's new JS/CSS is picked up
         # without a manual hard-reload (StaticFiles alone allows heuristic caching).
         response = await call_next(request)
-        if not request.url.path.startswith("/api"):
+        # Match the /api/ ENDPOINT namespace only — note the trailing slash, so the
+        # UI asset /api.js (which also starts with "/api") still gets no-cache and
+        # isn't served stale after a reinstall.
+        if not request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-cache"
         return response
 

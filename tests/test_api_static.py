@@ -49,3 +49,12 @@ def test_ui_assets_sent_no_cache():
     assert c.get("/").headers.get("cache-control") == "no-cache"
     # API responses aren't forced no-cache by the UI middleware
     assert "no-cache" not in (c.get("/api/health").headers.get("cache-control") or "")
+
+
+def test_api_js_asset_gets_no_cache():
+    # /api.js is a UI ASSET, not an /api/ endpoint — its name starts with "/api"
+    # but it must still be no-cache, or the browser serves a stale api.js after a
+    # reinstall (causing "api.setHomepage is not a function" style mismatches).
+    cfg = DaemonConfig(token="t", roots=["/x"])
+    app = create_app(cfg, manager=FakeManager(), command_builder=lambda *a: None)
+    assert TestClient(app).get("/api.js").headers.get("cache-control") == "no-cache"

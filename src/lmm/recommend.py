@@ -55,12 +55,15 @@ class LaunchConfig:
 
 
 def plumbing_flags(model_path: str, *, host: str, port: int,
-                   alias: str | None = None, api_key: str | None = None) -> list[str]:
+                   alias: str | None = None, api_key: str | None = None,
+                   mmproj: str | None = None) -> list[str]:
     """Deployment flags the daemon OWNS and derives from its own config — never
     user-editable. --host must match the daemon's bind, --api-key/--port are
-    daemon-managed, -m/--alias are the model identity. Kept out of the tuning set
-    so the UI can't (and the recommend default can't) set them wrong."""
+    daemon-managed, -m/--alias/--mmproj are the model identity/capability. Kept
+    out of the tuning set so the UI can't (and recommend can't) set them wrong."""
     flags = ["-m", model_path]
+    if mmproj:
+        flags += ["--mmproj", mmproj]   # vision projector → multimodal (image) input
     if api_key:
         flags += ["--api-key", api_key]
     flags += ["--host", host, "--port", str(port)]
@@ -121,7 +124,7 @@ def recommend_config(model: Model, metadata: dict, hardware: HardwareInfo, *,
 
     # Plumbing (daemon-owned) + tuning = the full launch flags.
     plumbing = plumbing_flags(str(model.path), host=host, port=port,
-                              alias=alias, api_key=api_key)
+                              alias=alias, api_key=api_key, mmproj=model.mmproj)
     return LaunchConfig(model_path=str(model.path), context=context,
                         cache_type=cache_type, flags=plumbing + tuning,
                         tuning_flags=tuning, estimate=estimate, fit=fit,

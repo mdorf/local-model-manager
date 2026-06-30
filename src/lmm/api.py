@@ -69,7 +69,7 @@ def _model_dict(m: Model, homepage_override: str | None = None) -> dict:
             "hf_base_repo": m.hf_base_repo, "license": m.license,
             "quantized_by": m.quantized_by, "has_chat_template": m.has_chat_template,
             "author": m.author, "display_name": m.name, "sampling": m.sampling,
-            "homepage_override": homepage_override}
+            "homepage_override": homepage_override, "has_vision": m.mmproj is not None}
 
 
 def _instance_dict(inst: ServerInstance) -> dict:
@@ -100,7 +100,7 @@ def _default_command_builder(config: DaemonConfig):
                 # (loopback = local-only, no key — llama-server's own UI stays open).
                 lan = not is_loopback(config.host)
                 plumbing = plumbing_flags(str(m.path), host=config.host, port=port,
-                                          alias=m.path.stem,
+                                          alias=m.path.stem, mmproj=m.mmproj,
                                           api_key=config.inference_key if lan else None)
                 return ["llama-server", *plumbing, *tuning], str(m.path)
         raise HTTPException(status_code=404, detail="model not found")

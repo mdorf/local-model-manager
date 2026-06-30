@@ -209,6 +209,9 @@ function renderDetail() {
     row("Author", esc(meta.author || "")) +
     row("Max context", meta.context_length ? meta.context_length.toLocaleString() + " tokens" : "") +
     (meta.has_mtp ? row("Speculative", "draft-mtp (built-in draft head)") : "") +
+    row("Vision", meta.has_vision
+      ? "multimodal — image input (mmproj loaded)"
+      : `text-only <span style="color:var(--fg-muted)">(no vision projector)</span>`) +
     (meta.has_chat_template ? row("Chat template", "embedded") : "") +
     (samplingStr ? row("Sampling", samplingStr +
       ` <span style="color:var(--fg-muted)">(model defaults — set in your chat client)</span>`) : "") +

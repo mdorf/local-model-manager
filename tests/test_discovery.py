@@ -26,6 +26,18 @@ def test_discovers_models_recursively(tmp_path):
     assert {m.path.name for m in models} == {"x.gguf", "y.gguf"}
 
 
+def test_mmproj_excluded_as_model_and_attached(tmp_path):
+    # A multimodal repo layout: the model GGUF + a sibling mmproj-*.gguf projector.
+    # The projector must NOT appear as its own model, and the model must expose it
+    # via .mmproj so the launcher can add --mmproj.
+    d = tmp_path / "Ornith-APEX"
+    _write(d / "Ornith-1.0-35B-MTP-APEX-I-Balanced.gguf")
+    (d / "mmproj-F16.gguf").write_bytes(b"\x00")   # projector (collected, not parsed)
+    models = discover_models([tmp_path])
+    assert [m.path.name for m in models] == ["Ornith-1.0-35B-MTP-APEX-I-Balanced.gguf"]
+    assert models[0].mmproj == str(d / "mmproj-F16.gguf")
+
+
 def test_attaches_sidecars(tmp_path):
     d = tmp_path / "m"
     _write(d / "model.gguf")

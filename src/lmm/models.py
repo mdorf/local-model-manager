@@ -49,6 +49,16 @@ class Model:
         (the stem is the served --alias, e.g. `Qwen3.6-27B-Q8_0`)."""
         return query in (self.path.name, str(self.path), self.path.stem)
 
+    @property
+    def mmproj(self) -> str | None:
+        """Path to the sibling multimodal vision projector (mmproj-*.gguf), if any.
+        Its presence means the model is vision-capable when launched with
+        `--mmproj`. Derived from the sidecars discovery already collects."""
+        for s in self.sidecars:
+            if s.name.lower().startswith("mmproj"):
+                return str(s)
+        return None
+
 
 def _derive_family(basename: str, size_label: str) -> str:
     fam = basename.strip()

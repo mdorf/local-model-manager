@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from lmm.hardware import HardwareInfo
 from lmm.models import Model
 from lmm.recommend import (
@@ -20,13 +22,14 @@ _SUPPORTED = {"-m", "-ngl", "-fa", "--jinja", "--cache-type-k", "--cache-type-v"
               "--port", "--alias"}
 
 
-def _model(tmp_path, *, has_mtp, size_bytes, has_chat_template=False):
+def _model(tmp_path, *, has_mtp, size_bytes, has_chat_template=False, mmproj=None):
     f = tmp_path / "m.gguf"
     f.write_bytes(b"\x00" * size_bytes)
     return Model(path=f, arch="qwen35", name="m", family="qwen3.6",
                  size_label="27B", quant="Q8_0", block_count=65,
                  context_length=262144, has_mtp=has_mtp, hf_base_repo=None,
-                 shards=[f], sidecars=[], has_chat_template=has_chat_template)
+                 shards=[f], sidecars=([Path(mmproj)] if mmproj else []),
+                 has_chat_template=has_chat_template)
 
 
 def _hw(total_gib):
@@ -118,6 +121,22 @@ def test_recommend_adds_jinja_when_embedded_chat_template(tmp_path):
     m = _model(tmp_path, has_mtp=False, size_bytes=1000, has_chat_template=True)
     cfg = recommend_config(m, _META, _hw(64), supported=_SUPPORTED)
     assert "--jinja" in cfg.tuning_flags
+
+
+def test_plumbing_flags_includes_mmproj():
+    from lmm.recommend import plumbing_flags
+    f = plumbing_flags("/m/x.gguf", host="127.0.0.1", port=8080,
+                       mmproj="/m/mmproj-F16.gguf")
+    assert "--mmproj" in f and f[f.index("--mmproj") + 1] == "/m/mmproj-F16.gguf"
+
+
+def test_recommend_adds_mmproj_when_projector_present(tmp_path):
+    # A model with a sibling mmproj projector → --mmproj in the launch (plumbing,
+    # NOT a user-editable tuning flag).
+    m = _model(tmp_path, has_mtp=False, size_bytes=1000, mmproj="/m/mmproj-F16.gguf")
+    cfg = recommend_config(m, _META, _hw(64), supported=_SUPPORTED)
+    assert "--mmproj" in cfg.flags
+    assert "--mmproj" not in cfg.tuning_flags
 
 
 def test_recommend_omits_jinja_without_chat_template(tmp_path):

@@ -18,6 +18,15 @@ def test_model_matches_filename_path_and_stem():
     assert not m.matches("Qwen3.6-27B-Other")
 
 
+def test_model_mmproj_from_sidecars():
+    m = Model(path=Path("/m/x.gguf"), arch="q", name="x", family="x", size_label="35B",
+              quant="Q8_0", block_count=40, context_length=262144, has_mtp=False,
+              hf_base_repo=None,
+              sidecars=[Path("/m/template.jinja"), Path("/m/mmproj-F16.gguf")])
+    assert m.mmproj == "/m/mmproj-F16.gguf"
+    assert _mk("/m/x.gguf").mmproj is None   # no sidecars → text-only
+
+
 def test_quant_mapping():
     assert quant_from_file_type(7) == "Q8_0"
     assert quant_from_file_type(0) == "F32"
